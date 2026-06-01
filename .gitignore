@@ -1,0 +1,25 @@
+# 환경변수 / 시크릿 (제일 중요!)
+.env
+.env.*
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# IDE 설정
+.vscode/
+.idea/
+
+# DB / 로그
+*.sqlite3
+*.db
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
