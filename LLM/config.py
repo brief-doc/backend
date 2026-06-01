@@ -16,7 +16,7 @@
 # ========== 사용할 LLM 모델명 (최상단에서 선언) ==========
 # 모든 곳에서 이 변수를 참조하므로 여기만 변경하면 됨
 # 사용 가능한 모델: "gemma3n:e2b", "qwen2.5:3b", "llama2" 등
-model_name = "gemma3n:e2b"
+model_name = "llama2"  # Ollama에서 실행 중인 모델명 (예시)
 
 # ========== LLM (대형 언어 모델) 설정 ==========
 # Ollama를 통해 로컬에서 실행되는 모델 설정
@@ -31,7 +31,7 @@ LLM_CONFIG = {
 EMBEDDING_CONFIG = {
     "model_name": "BAAI/bge-m3",  # HuggingFace 모델명
                                                    # 다른 모델로 바꾸려면: "monologg/kobert-base" 등
-    "device": "cuda",                             # "cuda" (GPU) 또는 "cpu"
+    "device": "cuda",                             # "cuda" (GPU) 또는 "cpu" - CPU로 변경 (GPU 메모리 부족 시)
     "normalize_embeddings": True                  # 임베딩 정규화 (유사도 계산 개선)
 }
 

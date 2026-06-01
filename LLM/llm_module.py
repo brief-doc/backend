@@ -14,6 +14,8 @@ LLM 모듈 - 대형 언어 모델 관리
 
 from langchain_ollama import ChatOllama
 from config import LLM_CONFIG
+import requests
+import time
 
 
 class LLMManager:
@@ -146,6 +148,80 @@ def get_llm_manager() -> LLMManager:
     if _llm_manager is None:
         _llm_manager = LLMManager()
     return _llm_manager
+
+
+def check_ollama_server() -> dict:
+    """
+    Ollama 서버 상태 확인
+    
+    역할:
+    - Ollama 서버가 정상 작동하는지 확인
+    - 설치된 모델 목록 조회
+    
+    반환값:
+    - {
+        "status": "ok" or "error",
+        "message": "상태 메시지",
+        "models": ["모델명1", "모델명2"],
+        "server_url": "http://..."
+      }
+    """
+    server_url = LLM_CONFIG["base_url"]
+    
+    try:
+        # 1. Ollama 서버 연결 확인
+        response = requests.get(f"{server_url}/api/tags", timeout=5)
+        
+        if response.status_code != 200:
+            return {
+                "status": "error",
+                "message": f"Ollama 서버 응답 오류 (상태코드: {response.status_code})",
+                "server_url": server_url
+            }
+        
+        # 2. 설치된 모델 목록 조회
+        data = response.json()
+        models = [model["name"] for model in data.get("models", [])]
+        
+        if not models:
+            return {
+                "status": "warning",
+                "message": "Ollama 서버 연결됨, 하지만 설치된 모델이 없습니다",
+                "models": [],
+                "server_url": server_url
+            }
+        
+        # 3. 현재 사용 중인 모델이 설치되어 있는지 확인
+        current_model = LLM_CONFIG["model_name"]
+        model_found = any(current_model in model for model in models)
+        
+        return {
+            "status": "ok",
+            "message": f"✓ Ollama 서버 정상 작동 (모델 {len(models)}개)",
+            "models": models,
+            "server_url": server_url,
+            "current_model": current_model,
+            "model_found": model_found
+        }
+        
+    except requests.ConnectionError:
+        return {
+            "status": "error",
+            "message": f"Ollama 서버에 연결할 수 없습니다\n\n[해결 방법]\n1. 터미널에서 'ollama serve' 실행\n2. 또는 Ollama 앱 실행",
+            "server_url": server_url
+        }
+    except requests.Timeout:
+        return {
+            "status": "error",
+            "message": "Ollama 서버 응답 타임아웃 (서버가 응답하지 않음)",
+            "server_url": server_url
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Ollama 서버 상태 확인 실패: {str(e)}",
+            "server_url": server_url
+        }
 
 
 def generate_llm_answer(prompt: str) -> str:

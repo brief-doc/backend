@@ -207,10 +207,10 @@ class ImprovedRAGPipeline:
                     "references": []
                 }
             
-            # 2단계: 컨텍스트 텍스트 구성
+            # 2단계: 컨텍스트 텍스트 구성 (LLM 입력용)
             # 검색된 각 문서를 명시적으로 표시하여 LLM이 출처를 알 수 있도록
             context_text = "\n\n".join([
-                f"[{doc.metadata.get('file_name', 'Unknown')}]\n{doc.page_content}"
+                f"[{doc.metadata.get('file_name', 'Unknown')} - {doc.metadata.get('page_num', '?')}페이지]\n{doc.page_content}"
                 for doc in filtered_docs
             ])
             
@@ -223,12 +223,15 @@ class ImprovedRAGPipeline:
             answer = self.llm_manager.generate_answer(prompt)
             
             # 5단계: 참고 문서 정보 정리 (사용자가 출처를 알 수 있도록)
+            # 페이지 번호와 문서명을 포함해서 표시
             references = [
                 {
-                    "doc_id": doc.metadata.get("doc_id"),           # 문서 ID
-                    "file_name": doc.metadata.get("file_name"),     # 파일명
-                    "cat_id": doc.metadata.get("cat_id"),           # 카테고리 ID
-                    "snippet": doc.page_content[:150] + "..."       # 처음 150자 (미리보기)
+                    "doc_id": doc.metadata.get("doc_id"),                                    # 문서 ID
+                    "file_name": doc.metadata.get("file_name", "Unknown"),                   # 파일명
+                    "page_num": doc.metadata.get("page_num", "?"),                           # 페이지 번호
+                    "cat_id": doc.metadata.get("cat_id"),                                    # 카테고리 ID
+                    "location": f"{doc.metadata.get('file_name', 'Unknown')} - {doc.metadata.get('page_num', '?')}페이지",  # 위치 표시
+                    "snippet": doc.page_content[:200] + "..."                               # 처음 200자 (미리보기)
                 }
                 for doc in filtered_docs
             ]
