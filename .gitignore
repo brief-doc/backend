@@ -1,7 +1,4 @@
-# 모든 파일 무시
 
-!LLM/
-!.gitignore
 
 # Python
 __pycache__/
