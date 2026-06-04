@@ -1,5 +1,5 @@
 # 모든 파일 무시
-/*
+
 !LLM/
 !.gitignore
 
@@ -26,3 +26,6 @@ Thumbs.db
 .DS_Store
 Thumbs.db
 >>>>>>> 4f6b36a7ca96fed1e8afb05a22c8450035956816
+
+# 개인 편집기 설정 (필요시 제외)
+.vscode/
