@@ -38,7 +38,7 @@ except ImportError as e:
     print(f"[ERROR] llm_module 모듈 import 실패: {e}")
     get_llm_manager = None
     check_ollama_server = None
-
+  
 try:
     from rag_pipeline_v2 import ImprovedRAGPipeline
     rag_pipeline = "loaded"
@@ -48,11 +48,12 @@ except ImportError as e:
     ImprovedRAGPipeline = None
 
 try:
-    from ingest import ingest_pdf  # 벡터화 모듈
+    from ingest import ingest_pdf, ingest_markdown  # 벡터화 모듈
     ingest = "loaded"
 except ImportError as e:
     print(f"[ERROR] ingest 모듈 import 실패: {e}")
     ingest_pdf = None
+    ingest_markdown = None
 
 app = FastAPI(
     title=API_CONFIG.get("title", "LLM RAG API"),
@@ -198,6 +199,53 @@ async def upload_and_summarize(
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
+# ===================== Markdown Upload & Process =====================
+
+@app.post("/upload-markdown/")
+async def upload_markdown(
+    markdown_text: str = Form(...),
+    doc_id: int = Form(...),
+    user_id: int = Form(...),
+    doc_name: str = Form(default="마크다운 문서"),
+    chunking_method: str = Form(default="sections"),
+    enable_summary: bool = Form(default=True),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """마크다운 텍스트를 청킹하고 요약하여 저장"""
+    try:
+        # 입력 검증
+        if not markdown_text or not markdown_text.strip():
+            return {"status": "error", "detail": "마크다운 텍스트가 비어있습니다"}
+        
+        if len(markdown_text) > 1000000:  # 1MB 제한
+            return {"status": "error", "detail": "텍스트가 너무 깁니다 (최대 1MB)"}
+        
+        # ingest_markdown 모듈 로드 확인
+        if ingest_markdown is None:
+            return {"status": "error", "detail": "마크다운 처리 모듈을 찾을 수 없습니다"}
+        
+        # 마크다운 처리 (백그라운드에서 실행하지만 결과는 기다림)
+        result = ingest_markdown(
+            markdown_content=markdown_text,
+            doc_id=doc_id,
+            user_id=user_id,
+            doc_name=doc_name,
+            chunking_method=chunking_method,
+            enable_summary=enable_summary
+        )
+        
+        return {
+            "status": result.get("status", "success"),
+            "doc_id": doc_id,
+            "doc_name": doc_name,
+            "total_chunks": result.get("total_chunks", 0),
+            "detail": result.get("detail", "마크다운이 처리되었습니다"),
+            "chunking_method": chunking_method,
+            "summary_enabled": enable_summary
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
 # ===================== Batch Upload =====================
 
 @app.post("/batch-upload/")
@@ -264,6 +312,54 @@ async def batch_upload(
             "status": "success",
             "total_chunks": total_chunks,
             "results": results
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+@app.post("/summarize-markdown/")
+async def summarize_markdown(
+    markdown_text: str = Form(...),
+    chunking_method: str = Form(default="sections")
+):
+    """마크다운 텍스트를 청킹하고 각 청크를 요약
+    
+    Note: ChromaDB에 저장하지 않고 요약만 반환
+    """
+    try:
+        if not markdown_text or not markdown_text.strip():
+            return {"status": "error", "detail": "마크다운 텍스트가 비어있습니다"}
+        
+        try:
+            from .markdown_processor import MarkdownProcessor
+        except ImportError:
+            return {"status": "error", "detail": "마크다운 처리 모듈을 찾을 수 없습니다"}
+        
+        # 마크다운 처리기 초기화
+        processor = MarkdownProcessor()
+        
+        # 청킹 수행
+        if chunking_method == "sections":
+            chunks = processor.chunk_by_sections(markdown_text)
+        else:
+            chunks = processor.chunk_by_size(markdown_text)
+        
+        # 각 청크 요약 생성
+        results = []
+        for i, chunk in enumerate(chunks, 1):
+            summary = processor.summarize_chunk(chunk.get('content', ''))
+            results.append({
+                "chunk_id": i,
+                "section": chunk.get('section', chunk.get('id', 'N/A')),
+                "original": chunk.get('content', '')[:200] + "...",
+                "summary": summary,
+                "char_count": chunk.get('char_count', 0)
+            })
+        
+        return {
+            "status": "success",
+            "total_chunks": len(results),
+            "chunking_method": chunking_method,
+            "chunks": results
         }
     except Exception as e:
         return {"status": "error", "detail": str(e)}
@@ -364,3 +460,4 @@ async def health():
             "status": "unhealthy",
             "message": str(e)
         }
+    
