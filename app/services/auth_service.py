@@ -20,9 +20,7 @@ def get_users(db: Session, skip: int = 0, limit: int = 100):
 
 
 def get_user_session_by_token(db: Session, session_token: str):
-    return (
-        db.query(UserSession).filter(UserSession.session_token == session_token).first()
-    )
+    return db.query(UserSession).filter(UserSession.session_token == session_token).first()
 
 
 def get_session_by_id(db: Session, session_id: int):

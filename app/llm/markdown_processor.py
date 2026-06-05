@@ -203,9 +203,7 @@ class MarkdownProcessor:
 
         results = []
         for i, chunk in enumerate(chunks, 1):
-            print(
-                f"  [{i}/{len(chunks)}] 처리 중... ({chunk.get('char_count', 0)} 문자)"
-            )
+            print(f"  [{i}/{len(chunks)}] 처리 중... ({chunk.get('char_count', 0)} 문자)")
 
             chunk_copy = chunk.copy()
 

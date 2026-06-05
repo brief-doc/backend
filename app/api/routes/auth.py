@@ -58,9 +58,7 @@ def validate_access_and_session(request: Request, db: Session):
         return None
 
     try:
-        payload = jwt.decode(
-            access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
-        )
+        payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         if payload.get("type") != "access" or payload.get("sub") is None:
             return None
     except JWTError:
@@ -161,9 +159,7 @@ def login(
         )
 
     session_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(
-        days=settings.REFRESH_TOKEN_EXPIRE_DAYS
-    )
+    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     create_user_session(
         db,
         user.user_id,
@@ -213,9 +209,7 @@ def refresh_token(
 ):
     session_token = request.cookies.get("session_token")
     if not session_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="세션이 없습니다"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="세션이 없습니다")
 
     user = get_user_by_session_token(db, session_token)
     if not user:
@@ -263,9 +257,7 @@ def refresh_token(
 def get_sessions(request: Request, db: Session = Depends(get_db)):
     user = validate_access_and_session(request, db)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
     return get_user_sessions(db, user.user_id)
 
 
@@ -275,15 +267,11 @@ def revoke_session(
 ):
     user = validate_access_and_session(request, db)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
     session = get_session_by_id(db, session_id)
     if not session or session.user_id != user.user_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="세션을 찾을 수 없습니다"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="세션을 찾을 수 없습니다")
 
     deactivate_session(db, session)
     if request.cookies.get("session_token") == session.session_token:

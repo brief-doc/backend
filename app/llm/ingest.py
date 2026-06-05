@@ -159,7 +159,7 @@ def ingest_pdf(file_path: str, doc_id: int, user_id: int, doc_name: str = None) 
     try:
         os.makedirs(CHROMA_DB_PATH, exist_ok=True)
 
-        db = Chroma.from_documents(
+        Chroma.from_documents(
             documents=all_chunks, embedding=embeddings, persist_directory=CHROMA_DB_PATH
         )
 
@@ -271,9 +271,7 @@ def main():
     parser.add_argument("file_path", type=str, help="PDF 파일 경로")
     parser.add_argument("doc_id", type=int, help="문서 ID")
     parser.add_argument("user_id", type=int, help="사용자 ID")
-    parser.add_argument(
-        "--doc-name", type=str, default=None, help="커스텀 문서명 (기본값: 파일명)"
-    )
+    parser.add_argument("--doc-name", type=str, default=None, help="커스텀 문서명 (기본값: 파일명)")
 
     args = parser.parse_args()
 
