@@ -4,5 +4,6 @@ sqlalchemy
 psycopg2-binary
 redis
 
+pydantic
 ##코드 규칙 검사 및 자동 포맷팅
 ruff
