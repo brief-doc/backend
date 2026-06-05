@@ -54,12 +54,12 @@
       모델을 변경하려면 config.py만 수정하면 됩니다.
 """
 
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
+import chromadb
+from chromadb.utils import embedding_functions
 import psycopg2
 from datetime import datetime
 import hashlib
-from .config import EMBEDDING_CONFIG, DB_CONFIG, CHROMA_DB_PATH
+from .config import DB_CONFIG, CHROMA_DB_PATH
 from .llm_module import get_llm_manager
 
 class ImprovedRAGPipeline:
@@ -98,16 +98,18 @@ class ImprovedRAGPipeline:
         
         # 쿼리 캐시 초기화 (반복 쿼리 성능 향상)
         self.query_cache = {}
-        
-        # 한국어 임베딩 모델 로드
-        # - 모든 설정은 config.py의 EMBEDDING_CONFIG에서 관리됨
-        # - 모델 변경 시 config.py만 수정하면 됨
-        self.embeddings = HuggingFaceEmbeddings(
-            model_name=EMBEDDING_CONFIG["model_name"],
-            model_kwargs={'device': EMBEDDING_CONFIG["device"]},
-            encode_kwargs={'normalize_embeddings': EMBEDDING_CONFIG["normalize_embeddings"]}
+
+        # ChromaDB 네이티브 클라이언트 초기화
+        # - 데이터가 chromadb 기본 임베딩 함수(all-MiniLM-L6-v2, 384차원)로 저장됨
+        # - 동일한 함수로 검색해야 정확한 결과를 얻을 수 있음
+        self.ef = embedding_functions.DefaultEmbeddingFunction()
+        self.chroma_client = chromadb.PersistentClient(path=self.chroma_path)
+        self.collection = self.chroma_client.get_collection(
+            name="qa_collection",
+            embedding_function=self.ef
         )
-        
+        print(f"[DEBUG] ChromaDB 연결 성공 - 문서 수: {self.collection.count()}")
+
         # LLM 매니저 로드 (llm_module.py에서 관리)
         self.llm_manager = get_llm_manager()
         if self.llm_manager is None:
@@ -132,25 +134,16 @@ class ImprovedRAGPipeline:
         - None: 실패
         """
         try:
-            vectorstore = Chroma(
-                persist_directory=self.chroma_path,
-                embedding_function=self.embeddings
+            where = {}
+            if user_id is not None:
+                where["user_id"] = {"$eq": user_id}
+
+            results = self.collection.query(
+                query_texts=[""],
+                n_results=2,
+                where=where if where else None
             )
-            
-            # 리트리버 설정
-            search_kwargs = {"k": 2}  # 기본 상위 2개 (성능 최적화)
-            
-            # 메타데이터 필터 설정 (Chroma의 필터 형식)
-            # 주의: 메타데이터는 문자열로 저장되어 있으므로 문자열로 비교해야 함
-            if user_id is not None or cat_id is not None:
-                filter_dict = {}
-                if user_id is not None:
-                    filter_dict["user_id"] = {"$eq": str(user_id)}  # 문자열로 변환
-                if cat_id is not None:
-                    filter_dict["cat_id"] = {"$eq": str(cat_id)}    # 문자열로 변환
-                search_kwargs["filter"] = filter_dict
-            
-            return vectorstore.as_retriever(**search_kwargs)
+            return results
         except Exception as e:
             print(f"✗ 리트리버 생성 실패: {e}")
             return None
@@ -208,55 +201,45 @@ class ImprovedRAGPipeline:
             if cache_key in self.query_cache:
                 return self.query_cache[cache_key]
             
-            # 1단계: 문서 검색 (필터링 포함)
-            vectorstore = Chroma(
-                persist_directory=self.chroma_path,
-                embedding_function=self.embeddings
+            # 1단계: ChromaDB 네이티브 클라이언트로 문서 검색
+            where = {}
+            if user_id is not None and user_id != 0:
+                where["user_id"] = {"$eq": user_id}
+
+            results = self.collection.query(
+                query_texts=[query],
+                n_results=top_k,
+                where=where if where else None
             )
-            
-            docs = vectorstore.similarity_search(query, k=top_k * 5)
-            
-            # 필터링 (메타데이터 타입 무관하게 문자열로 통일 비교)
-            def meta_match(doc_meta, key, value):
-                """메타데이터 값을 문자열/정수 모두 허용해서 비교"""
-                if value is None:
-                    return True
-                stored = doc_meta.get(key)
-                if stored is None:
-                    return True  # 메타데이터 없으면 통과
-                return str(stored) == str(value)
-            
-            filtered_docs = []
-            for doc in docs:
-                if not meta_match(doc.metadata, "user_id", user_id):
-                    continue
-                if not meta_match(doc.metadata, "cat_id", cat_id):
-                    continue
-                filtered_docs.append(doc)
-                if len(filtered_docs) >= top_k:
-                    break
-            
-            # 필터링 결과가 없으면 필터 없이 재검색 (fallback)
-            if not filtered_docs:
-                print(f"[WARN] 필터링 후 결과 없음 (user_id={user_id}, cat_id={cat_id}), 필터 없이 재검색...")
-                filtered_docs = docs[:top_k]
-            
-            if not filtered_docs:
+
+            documents = results.get("documents", [[]])[0]
+            metadatas = results.get("metadatas", [[]])[0]
+
+            if not documents:
+                # fallback: 필터 없이 재검색
+                print(f"[WARN] 필터 검색 결과 없음, 필터 없이 재검색...")
+                results = self.collection.query(
+                    query_texts=[query],
+                    n_results=top_k
+                )
+                documents = results.get("documents", [[]])[0]
+                metadatas = results.get("metadatas", [[]])[0]
+
+            if not documents:
                 return {
                     "status": "error",
                     "message": "검색 결과 없음",
                     "answer": None,
                     "references": []
                 }
-            
+
             # 2단계: 컨텍스트 텍스트 구성 (LLM 입력용)
-            # 검색된 각 문서를 명시적으로 표시하여 LLM이 출처를 알 수 있도록
             context_text = "\n\n".join([
-                f"[{doc.metadata.get('file_name', 'Unknown')} - {doc.metadata.get('page_num', '?')}페이지]\n{doc.page_content}"
-                for doc in filtered_docs
+                f"[사건번호: {metadatas[i].get('case_no', 'Unknown')}]\n{documents[i]}"
+                for i in range(len(documents))
             ])
             
-            print(f"[DEBUG] 검색된 문서 수: {len(filtered_docs)}")
+            print(f"[DEBUG] 검색된 문서 수: {len(documents)}")
             print(f"[DEBUG] 컨텍스트 길이: {len(context_text)}")
             
             # 3단계: LLM에 전달할 프롬프트 구성
@@ -280,17 +263,14 @@ class ImprovedRAGPipeline:
                 }
             
             # 5단계: 참고 문서 정보 정리 (사용자가 출처를 알 수 있도록)
-            # 페이지 번호와 문서명을 포함해서 표시
             references = [
                 {
-                    "doc_id": doc.metadata.get("doc_id"),                                    # 문서 ID
-                    "file_name": doc.metadata.get("file_name", "Unknown"),                   # 파일명
-                    "page_num": doc.metadata.get("page_num", "?"),                           # 페이지 번호
-                    "cat_id": doc.metadata.get("cat_id"),                                    # 카테고리 ID
-                    "location": f"{doc.metadata.get('file_name', 'Unknown')} - {doc.metadata.get('page_num', '?')}페이지",  # 위치 표시
-                    "snippet": doc.page_content[:200] + "..."                               # 처음 200자 (미리보기)
+                    "case_no": metadatas[i].get("case_no", "Unknown"),
+                    "source": metadatas[i].get("source", "Unknown"),
+                    "doc_type": metadatas[i].get("doc_type", ""),
+                    "snippet": documents[i][:200] + "..."
                 }
-                for doc in filtered_docs
+                for i in range(len(documents))
             ]
             
             # 6단계: 최종 결과 반환

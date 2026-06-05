@@ -93,7 +93,7 @@ LLM_CONFIG = {
 # 빠른 임베딩을 위해 기본값을 sentence-transformers로 변경 (더 가벼움)
 EMBEDDING_CONFIG = {
     "model_name": os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
-    "device": os.getenv("EMBEDDING_DEVICE", "cpu"),
+    "device": os.getenv("EMBEDDING_DEVICE", "cuda"),
     "normalize_embeddings": os.getenv("NORMALIZE_EMBEDDINGS", "True").lower() == "true"
 }
 

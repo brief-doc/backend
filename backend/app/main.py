@@ -29,7 +29,7 @@ except ImportError as e:
     print(f"[ERROR] config 모듈 import 실패: {e}")
     API_CONFIG = {"title": "LLM RAG API", "description": "민사법 질의응답 시스템", "version": "1.0"}
     CHROMA_DB_PATH = "./chroma_pdf_db"
-    EMBEDDING_CONFIG = {"model_name": "BAAI/bge-m3", "device": "cpu"}
+    EMBEDDING_CONFIG = {"model_name": "BAAI/bge-m3", "device": "cuda"}
     CURRENT_MODEL = "gemma3n:e2b"
     LLM_CONFIG = {"model_name": CURRENT_MODEL, "temperature": 0.7, "base_url": "http://localhost:11434"}
 
