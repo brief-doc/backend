@@ -13,7 +13,7 @@ import fitz
 import numpy as np
 import pypdfium2 as pdfium
 
-from app.OCR.utils import BATCH_SIZE, OCR_ZOOM, SAVE_CROPS, clean_text
+from app.ocr.utils import BATCH_SIZE, OCR_ZOOM, SAVE_CROPS, clean_text
 
 
 # ── pypdfium2: bbox 영역 텍스트 추출 ─────────────────────────────────────────

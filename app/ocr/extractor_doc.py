@@ -4,7 +4,7 @@ DOC 추출기
 
 """
 
-from app.OCR.utils import LLAMA_API_KEY, clean_text
+from app.ocr.utils import LLAMA_API_KEY, clean_text
 
 
 def process_doc(file_path: str) -> list[str]:

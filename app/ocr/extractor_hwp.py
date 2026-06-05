@@ -7,7 +7,7 @@ HWP / HWPX 추출기
 
 import cv2
 
-from app.OCR.utils import clean_text
+from app.ocr.utils import clean_text
 
 
 def process_hwp(file_path: str, ocr_reader=None) -> list[str]:
