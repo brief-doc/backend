@@ -4,8 +4,8 @@ from sqlalchemy.orm import Session
 from app.core.security import get_current_user
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.document import DocResponse
-from app.services import doc_service
+from app.schemas.document import DocResponse  # 상세 쓸 거면 DocDetail도 추가
+from app.services import document_service as doc_service
 
 router = APIRouter(prefix="/docs", tags=["docs"])
 
