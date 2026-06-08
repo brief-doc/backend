@@ -238,4 +238,16 @@ CREATE INDEX IF NOT EXISTS idx_draft_author    ON public.draft (author_id);
 CREATE INDEX IF NOT EXISTS idx_noti_user_read  ON public.notification (user_id, is_read);
 
 
+<<<<<<< HEAD
+=======
+-- ============================================================
+--  기초 데이터 (역할)
+-- ============================================================
+INSERT INTO public.role (role_name, description) VALUES
+    ('실무 담당자', '문서 업로드/요약/RAG 질의/기안 작성'),
+    ('결재권자',   '상신된 기안 승인/반려'),
+    ('관리자',     '사용자/권한 관리, 통계 조회')
+ON CONFLICT (role_name) DO NOTHING;
+
+>>>>>>> 52af936506fba5978ae58aaae98c99726dc41505
 COMMIT;
