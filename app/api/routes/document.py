@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
 from app.db.database import get_db
-from app.db.models import User
 from app.schemas.document import DocResponse  # 상세 쓸 거면 DocDetail도 추가
 from app.services import document_service as doc_service
 
@@ -16,11 +14,11 @@ def list_documents(
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    # current_user: User = Depends(get_current_user),
 ):
     return doc_service.get_docs(
         db,
-        user_id=current_user.user_id,
+        #  user_id=current_user.user_id,
         category=category,
         skip=skip,
         limit=limit,
