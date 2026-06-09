@@ -41,6 +41,7 @@ class UserResponse(BaseModel):
 
 class SessionResponse(BaseModel):
     session_id: int
+    user_id: int
     created_at: datetime
     expires_at: Optional[datetime]
     is_active: bool
@@ -79,7 +80,6 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
             "id": user.user_id,
             "email": user.user_email,
             "name": user.user_name,
-            "user_name": user.user_name,
             "user_rank": user.user_rank,
         }
 
@@ -164,6 +164,8 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="이메일 또는 비밀번호가 올바르지 않습니다",
         )
+    
+
 
     session_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
@@ -209,8 +211,8 @@ def login(
         "id": user.user_id,
         "email": user.user_email,
         "name": user.user_name,
-        "user_name": user.user_name,
         "user_rank": user.user_rank,
+        "user_login": user.user_login,
     }
 
 
@@ -294,6 +296,48 @@ def revoke_session(
         response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
 
     return {"message": "세션이 종료되었습니다"}
+
+
+@router.post("/change-password")
+def change_password_endpoint(
+    change_req: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    사용자 비밀번호 변경 및 user_login 시간 업데이트
+    
+    - 현재 비밀번호 검증 후 새로운 비밀번호로 변경
+    - user_login이 null인 경우, 현재 시간으로 설정
+    - user_login이 이미 있는 경우, 새로운 로그인 시간으로 업데이트
+    """
+    # 사용자 확인
+    user = get_user_by_email(db, change_req.email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
+    
+    if user.user_id != change_req.userId:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="사용자 ID가 일치하지 않습니다")
+    
+    # 비밀번호 변경 (현재 비밀번호 검증 포함)
+    login_time = change_req.user_login if change_req.user_login else datetime.now(timezone.utc)
+    updated_user = change_password(
+        db, 
+        user.user_id, 
+        change_req.current_password,
+        change_req.new_password, 
+        login_time
+    )
+    
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="현재 비밀번호가 올바르지 않습니다")
+    
+    return {
+        "message": "비밀번호가 성공적으로 변경되었습니다",
+        "id": updated_user.user_id,
+        "email": updated_user.user_email,
+        "user_login": updated_user.user_login,
+    }
 
 
 @router.post("/logout")
