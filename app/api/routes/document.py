@@ -16,7 +16,7 @@ def list_documents(
     db: Session = Depends(get_db),
     # current_user: User = Depends(get_current_user),
 ):
-    return doc_service.get_docs(
+    return doc_service.get_docs_with_latest_job(
         db,
         #  user_id=current_user.user_id,
         category=category,
