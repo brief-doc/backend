@@ -13,7 +13,11 @@ except RuntimeError:
 import redis
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
+
+from app.api.routes.auth import router as auth_router
+from app.api.routes.document import router as doc_router
+from app.db.database import engine
 
 from app.llm.config import CURRENT_MODEL, LLM_CONFIG
 from app.llm.pipeline import invalidate_cache, run_query
@@ -32,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # ── 인프라 연결 ────────────────────────────────────────────────────────────
 try:
     engine = create_engine(
@@ -47,7 +52,12 @@ except Exception as e:
     print(f"[Redis] 연결 실패: {e}")
     redis_client = None
 
+
 executor = ThreadPoolExecutor(max_workers=3)
+
+# include API routers
+app.include_router(auth_router)
+app.include_router(doc_router)  # /docs 대신 /documents로 변경
 
 
 # ── 기본 라우트 ────────────────────────────────────────────────────────────
