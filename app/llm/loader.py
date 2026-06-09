@@ -1,4 +1,5 @@
 """qa_data JSON → ChromaDB qa_collection 로드 (임베딩 없이 직접 저장)"""
+
 import json
 import sys
 from pathlib import Path
@@ -51,17 +52,19 @@ def load_qa_data(limit: int = None, batch_size: int = 100) -> dict:
                 continue
             ids.append(case_no)
             texts.append(_extract(data))
-            metas.append({
-                "source": f.name,
-                "case_no": case_no,
-                "user_id": 1,
-                "doc_type": "qa_data",
-            })
+            metas.append(
+                {
+                    "source": f.name,
+                    "case_no": case_no,
+                    "user_id": 1,
+                    "doc_type": "qa_data",
+                }
+            )
             new += 1
             if len(ids) >= batch_size:
                 col.upsert(ids=ids, documents=texts, metadatas=metas)
                 ids, texts, metas = [], [], []
-                print(f"  저장: {idx+1}/{len(files)} | 신규 {new} | 스킵 {skip}")
+                print(f"  저장: {idx + 1}/{len(files)} | 신규 {new} | 스킵 {skip}")
         except Exception as e:
             print(f"  [skip] {f.name}: {e}")
 

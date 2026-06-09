@@ -16,6 +16,7 @@
   - 각 청크를 개별 요약 (Map)
   - 부분 요약들을 합쳐 최종 요약 생성 (Reduce)
 """
+
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -26,8 +27,8 @@ _MAP_WORKERS = int(os.getenv("MAP_WORKERS", "3"))
 
 # gemma2:2b 컨텍스트 4096 토큰 기준
 # 시스템 프롬프트·템플릿 ~500자, 출력 여유 ~500자 → 입력 최대 약 3000자
-CHUNK_SIZE     = 2500   # 청크당 최대 글자 수 (여유 있게 설정)
-CHUNK_OVERLAP  = 200    # 청크 간 겹침 (문맥 연속성 유지)
+CHUNK_SIZE = 2500  # 청크당 최대 글자 수 (여유 있게 설정)
+CHUNK_OVERLAP = 200  # 청크 간 겹침 (문맥 연속성 유지)
 
 # ── 공통 시스템 지시 ──────────────────────────────────────────────────────────
 _SYSTEM_RULES = """당신은 공공기관 행정 문서 요약 전문가입니다. 반드시 아래 규칙을 따르십시오.
@@ -47,7 +48,6 @@ _TEMPLATES: dict[str, str] = {
 3. 주요 의무·금지 사항 (조항 번호 포함)
 4. 위반 시 제재·벌칙
 5. 시행 기관 및 담당 부서""",
-
     "가이드라인·지침": """\
 아래 항목을 번호 순서대로 반드시 추출하여 작성하십시오.
 1. 지침명 및 발행 기관·발행 일자
@@ -55,7 +55,6 @@ _TEMPLATES: dict[str, str] = {
 3. 핵심 절차 (단계별로 작성)
 4. 준수 기준 및 예외 사항
 5. 문의처 및 담당 부서""",
-
     "공모·사업": """\
 아래 항목을 번호 순서대로 반드시 추출하여 작성하십시오.
 1. 사업명 및 주관 기관
@@ -63,7 +62,6 @@ _TEMPLATES: dict[str, str] = {
 3. 지원 규모·금액
 4. 신청 기간 및 신청 방법
 5. 선정 기준 및 주요 일정""",
-
     "감사": """\
 아래 항목을 번호 순서대로 반드시 추출하여 작성하십시오.
 1. 감사 기관 및 피감사 기관
@@ -71,7 +69,6 @@ _TEMPLATES: dict[str, str] = {
 3. 주요 지적 사항 (항목별로 작성)
 4. 조치 요구 사항 및 이행 기한
 5. 처분 결과 및 후속 조치""",
-
     "내부 규정": """\
 아래 항목을 번호 순서대로 반드시 추출하여 작성하십시오.
 1. 규정명 및 제정·개정 일자
@@ -79,7 +76,6 @@ _TEMPLATES: dict[str, str] = {
 3. 주요 내용 (조항별로 핵심만 작성)
 4. 담당 부서 및 책임자
 5. 시행일""",
-
     "기타": """\
 아래 항목을 번호 순서대로 반드시 추출하여 작성하십시오.
 1. 문서명 및 발행 기관
@@ -155,9 +151,7 @@ def _map_summarize(chunk: str, chunk_idx: int, total: int, category: str) -> str
 def _reduce_summarize(partial_summaries: list[str], category: str) -> str:
     """부분 요약들을 합쳐 최종 카테고리별 요약을 생성합니다 (Reduce 단계)."""
     template = _TEMPLATES.get(category, _TEMPLATES["기타"])
-    combined = "\n\n".join(
-        f"[부분 요약 {i + 1}]\n{s}" for i, s in enumerate(partial_summaries)
-    )
+    combined = "\n\n".join(f"[부분 요약 {i + 1}]\n{s}" for i, s in enumerate(partial_summaries))
     prompt = f"""{_SYSTEM_RULES}
 
 [문서 카테고리] {category}
@@ -200,8 +194,13 @@ def summarize_document(doc_text: str, category: str) -> dict:
         }
     """
     if not doc_text or not doc_text.strip():
-        return {"status": "error", "category": category, "summary": "",
-                "chunks_used": 0, "message": "원문이 비어 있습니다."}
+        return {
+            "status": "error",
+            "category": category,
+            "summary": "",
+            "chunks_used": 0,
+            "message": "원문이 비어 있습니다.",
+        }
 
     resolved_category = category if category in _TEMPLATES else "기타"
 
@@ -212,15 +211,15 @@ def summarize_document(doc_text: str, category: str) -> dict:
             result = get_llm().invoke(prompt)
             summary = result.content.strip() if hasattr(result, "content") else str(result).strip()
             return {
-                "status":      "success",
-                "category":    resolved_category,
-                "summary":     summary,
+                "status": "success",
+                "category": resolved_category,
+                "summary": summary,
                 "chunks_used": 1,
             }
 
         # ── 긴 문서: Map-Reduce ───────────────────────────────────
         chunks = _split_text(doc_text)
-        total  = len(chunks)
+        total = len(chunks)
 
         # Map: 각 청크 병렬 요약 (ThreadPoolExecutor)
         # Ollama는 단일 프로세스이므로 _MAP_WORKERS 스레드가 동시 요청 → 큐잉됨
@@ -255,17 +254,17 @@ def summarize_document(doc_text: str, category: str) -> dict:
         final_summary = _reduce_summarize(partial_summaries, resolved_category)
 
         return {
-            "status":      "success",
-            "category":    resolved_category,
-            "summary":     final_summary,
+            "status": "success",
+            "category": resolved_category,
+            "summary": final_summary,
             "chunks_used": total,
         }
 
     except Exception as e:
         return {
-            "status":      "error",
-            "category":    resolved_category,
-            "summary":     "",
+            "status": "error",
+            "category": resolved_category,
+            "summary": "",
             "chunks_used": 0,
-            "message":     f"요약 생성 실패: {e}",
+            "message": f"요약 생성 실패: {e}",
         }

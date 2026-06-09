@@ -7,6 +7,7 @@ sentence_transformers 미설치 시 → 리랭킹 생략 (자동 fallback)
 ⚠️ 중요: ingest.py 와 동일한 EMBEDDING_CONFIG 를 사용해야
           저장/검색 벡터 공간이 일치합니다.
 """
+
 import chromadb
 import numpy as np
 
@@ -26,6 +27,7 @@ try:
 
     class _STEmbeddingFunction:
         """로컬 BGE-M3 모델을 chromadb EF 인터페이스로 래핑 (API 키 불필요)"""
+
         def __init__(self):
             self._model = _LCEmbeddings(
                 model_name=EMBEDDING_CONFIG["model_name"],
@@ -51,6 +53,7 @@ except ImportError:
 # 선택적 패키지
 try:
     from rank_bm25 import BM25Okapi
+
     _BM25_OK = True
 except ImportError:
     _BM25_OK = False
@@ -58,12 +61,14 @@ except ImportError:
 
 try:
     from sentence_transformers import CrossEncoder
+
     _CE_OK = True
 except ImportError:
     _CE_OK = False
     print("[retriever] sentence_transformers 없음 → 리랭킹 생략")
 
 _retriever = None
+
 
 def get_retriever() -> "HybridRetriever":
     global _retriever
@@ -93,7 +98,7 @@ class HybridRetriever:
         self._ef = ef
 
         # 검색 방식 자동 결정: BGE-M3 테스트 쿼리로 차원 호환 여부 확인
-        self._use_texts = False   # 기본: BGE-M3 직접 임베딩
+        self._use_texts = False  # 기본: BGE-M3 직접 임베딩
         if self.col.count() > 0:
             try:
                 test_emb = ef(["차원 테스트"])
@@ -108,7 +113,7 @@ class HybridRetriever:
                     raise
 
         self.reranker = CrossEncoder(RERANKER_MODEL) if _CE_OK else None
-        mode   = "hybrid" if _BM25_OK else "vector-only"
+        mode = "hybrid" if _BM25_OK else "vector-only"
         rerank = "+rerank" if self.reranker else ""
         search = "query_texts" if self._use_texts else "BGE-M3"
         print(f"[retriever] {mode} {rerank} | {search} | docs={self.col.count()}")
@@ -120,9 +125,9 @@ class HybridRetriever:
         # 우선순위: user_id 일치 → 전체 문서 폴백
         filters_to_try: list = []
         if user_id is not None:
-            filters_to_try.append({"user_id": {"$eq": int(user_id)}})    # 정수
-            filters_to_try.append({"user_id": {"$eq": str(user_id)}})    # 문자열
-        filters_to_try.append(None)   # 최종 폴백: 필터 없이 전체 검색
+            filters_to_try.append({"user_id": {"$eq": int(user_id)}})  # 정수
+            filters_to_try.append({"user_id": {"$eq": str(user_id)}})  # 문자열
+        filters_to_try.append(None)  # 최종 폴백: 필터 없이 전체 검색
 
         def _run_query(where):
             base_kwargs = {"n_results": n_results}
@@ -137,7 +142,7 @@ class HybridRetriever:
             try:
                 res = _run_query(where)
                 docs = res["documents"][0]
-                if docs:           # 결과가 있으면 즉시 반환
+                if docs:  # 결과가 있으면 즉시 반환
                     if where is None and user_id is not None:
                         print(f"[retriever] user_id={user_id} 필터 결과 없음 → 전체 문서 검색")
                     return docs, res["metadatas"][0]
@@ -163,9 +168,9 @@ class HybridRetriever:
                 tokenized = [d.split() for d in docs]
                 # 빈 토큰 문서 방지 (ZeroDivisionError 방지)
                 tokenized = [t if t else ["_empty_"] for t in tokenized]
-                bm25 = self._normalize(np.array(
-                    BM25Okapi(tokenized).get_scores(query.split() or ["_"]), dtype=float
-                ))
+                bm25 = self._normalize(
+                    np.array(BM25Okapi(tokenized).get_scores(query.split() or ["_"]), dtype=float)
+                )
             except Exception:
                 bm25 = np.ones(len(docs))
         else:
@@ -173,9 +178,9 @@ class HybridRetriever:
 
         # CrossEncoder 리랭킹 (설치된 경우)
         if self.reranker:
-            ce = self._normalize(np.array(
-                self.reranker.predict([[query, d] for d in docs]), dtype=float
-            ))
+            ce = self._normalize(
+                np.array(self.reranker.predict([[query, d] for d in docs]), dtype=float)
+            )
             combined = 0.3 * bm25 + 0.7 * ce
         else:
             combined = bm25  # BM25만 또는 동일 가중치

@@ -8,6 +8,7 @@ RAG 파이프라인 — 하이브리드 검색 + 프롬프트 규율
   - 공공기관 행정 격식체(합쇼체) 강제
   - few-shot 예시 2개 내장 (행정 문서 도메인)
 """
+
 import hashlib
 from datetime import datetime
 
@@ -52,7 +53,7 @@ def _build_prompt(docs: list[str], metas: list[dict], query: str) -> str:
         category = meta.get("category", "")
         doc_name = meta.get("doc_name") or meta.get("file_name") or meta.get("case_no", "?")
         page = meta.get("page_num", "")
-        header = f"[문서 {i+1}]"
+        header = f"[문서 {i + 1}]"
         if category:
             header += f" [{category}]"
         header += f" {doc_name}"
@@ -92,8 +93,8 @@ def _log_history(user_id: int, query: str, answer: str, refs: list[dict]):
 # 캐시 구조:
 #   _cache_data[cache_key]  = result
 #   _cache_index[user_id]   = {cache_key, cache_key, ...}  ← user_id 역인덱스
-_cache_data:  dict[str, dict]       = {}
-_cache_index: dict[int, set[str]]   = {}
+_cache_data: dict[str, dict] = {}
+_cache_index: dict[int, set[str]] = {}
 
 
 def invalidate_cache(user_id: int | None = None) -> int:
@@ -108,7 +109,7 @@ def invalidate_cache(user_id: int | None = None) -> int:
 
     if user_id is None:
         count = len(_cache_data)
-        _cache_data  = {}
+        _cache_data = {}
         _cache_index = {}
         return count
 
@@ -140,10 +141,10 @@ def run_query(question: str, user_id: int | None = None, cat_id: int | None = No
     # references: 파일명·카테고리·페이지 포함
     refs = [
         {
-            "doc_name":  metas[i].get("doc_name") or metas[i].get("file_name", "?"),
-            "category":  metas[i].get("category", ""),
-            "page":      metas[i].get("page_num", ""),
-            "snippet":   docs[i][:200] + "...",
+            "doc_name": metas[i].get("doc_name") or metas[i].get("file_name", "?"),
+            "category": metas[i].get("category", ""),
+            "page": metas[i].get("page_num", ""),
+            "snippet": docs[i][:200] + "...",
         }
         for i in range(len(docs))
     ]
