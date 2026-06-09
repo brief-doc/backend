@@ -1,48 +1,62 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Cookie, Request, Response
-from jose import JWTError, jwt
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
-from datetime import datetime, timedelta, timezone
 import secrets
-from app.core.config import settings 
-import os
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
-from app.db.database import get_db
-from app.schemas.user import Token, UserCreate, RefreshTokenRequest
-from app.services.auth_service import (
-    get_user_by_email,
-    create_user,
-    create_user_session,
-    get_user_by_session_token,
-    get_user_session_by_token,
-    get_session_by_id,
-    get_user_sessions,
-    deactivate_session,
-)
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.core.security import (
-    verify_password,
     create_access_token,
     create_refresh_token,
+    verify_password,
     verify_token,
-    get_current_active_user
+)
+from app.db.database import get_db
+from app.schemas.user import RefreshTokenRequest, Token, UserCreate
+from app.services.auth_service import (
+    change_password,
+    create_user,
+    create_user_session,
+    deactivate_session,
+    get_session_by_id,
+    get_user_by_email,
+    get_user_by_session_token,
+    get_user_session_by_token,
+    get_user_sessions,
+    get_users,
+    reset_user_password,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-
 class UserResponse(BaseModel):
-    id: int # ID는 Integer입니다.
+    id: int  # ID는 Integer입니다.
     email: str
-    name: str # username 대신 name 사용
+    name: str  # username 대신 name 사용
     user_rank: int
+
+    class Config:
+        from_attributes = True
+
+
+class UserListResponse(BaseModel):
+    id: int
+    email: str
+    name: str
+    user_rank: int
+    user_login: Optional[datetime] = None
+    user_create: Optional[datetime] = None
+
     class Config:
         from_attributes = True
 
 
 class SessionResponse(BaseModel):
     session_id: int
+    user_id: int
     created_at: datetime
     expires_at: Optional[datetime]
     is_active: bool
@@ -52,7 +66,7 @@ class SessionResponse(BaseModel):
     class Config:
         from_attributes = True
 
-    
+
 def validate_access_and_session(request: Request, db: Session):
     access_token = request.cookies.get("access_token")
     session_token = request.cookies.get("session_token")
@@ -81,7 +95,6 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
             "id": user.user_id,
             "email": user.user_email,
             "name": user.user_name,
-            "user_name": user.user_name,
             "user_rank": user.user_rank,
         }
 
@@ -100,7 +113,10 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
     try:
         payload = verify_token(refresh_token_cookie, token_type="refresh")
         if str(payload.get("sub")) != str(user.user_id):
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="토큰 정보가 일치하지 않습니다")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="토큰 정보가 일치하지 않습니다",
+            )
 
         new_access_token = create_access_token(data={"sub": str(user.user_id)})
         response.set_cookie(
@@ -111,21 +127,26 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
             samesite="none",
             max_age=60 * 30,
         )
-        return {"authenticated": True, "id": user.user_id, "email": user.user_email, "name": user.user_name, "user_name": user.user_name, "user_rank": user.user_rank}
+        return {
+            "authenticated": True,
+            "id": user.user_id,
+            "email": user.user_email,
+            "name": user.user_name,
+            "user_rank": user.user_rank,
+        }
     except HTTPException:
-            response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
-            response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
-            response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
-            return {"authenticated": False}
-            return {"authenticated": False}
+        response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
+        response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
+        response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
+        return {"authenticated": False}
+        return {"authenticated": False}
 
 
 @router.post("/register", response_model=UserResponse)
 def register(user: UserCreate, db: Session = Depends(get_db)):
     if get_user_by_email(db, user.email):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="이미 존재하는 이메일입니다"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="이미 존재하는 이메일입니다"
         )
     new_user = create_user(db, user)
     return {
@@ -136,28 +157,37 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
         "user_rank": new_user.user_rank,
     }
 
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    email: str
+    userId: int
+    current_password: str
+    new_password: str
+    user_login: Optional[datetime] = None
+
 
 @router.post("/login")
 def login(
     login_data: LoginRequest,
     request: Request,
     response: Response,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     user = get_user_by_email(db, login_data.email)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="이메일 없다"
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="이메일 없다")
     if not verify_password(login_data.password, user.user_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="미이메일 또는 비밀번호가 올바르지 않습니다"
+            detail="이메일 또는 비밀번호가 올바르지 않습니다",
         )
+    
+
 
     session_token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
@@ -203,9 +233,56 @@ def login(
         "id": user.user_id,
         "email": user.user_email,
         "name": user.user_name,
-        "user_name": user.user_name,
         "user_rank": user.user_rank,
+        "user_login": user.user_login,
     }
+
+
+@router.get("/users", response_model=List[UserListResponse])
+def list_users(request: Request, db: Session = Depends(get_db)):
+    current_user = validate_access_and_session(request, db)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
+
+    users = get_users(db)
+    return [
+        {
+            "id": user.user_id,
+            "email": user.user_email,
+            "name": user.user_name,
+            "user_rank": user.user_rank,
+            "user_login": user.user_login,
+            "user_create": user.user_create,
+        }
+        for user in users
+    ]
+
+
+@router.post("/users/{user_id}/reset-password")
+def reset_password(user_id: int, request: Request, db: Session = Depends(get_db)):
+    current_user = validate_access_and_session(request, db)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
+
+    updated_user = reset_user_password(db, user_id)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
+
+    return {"message": "암호가 초기화되었습니다"}
+
+
+@router.post("/users/{user_id}/force-logout")
+def force_logout_user(user_id: int, request: Request, response: Response, db: Session = Depends(get_db)):
+    current_user = validate_access_and_session(request, db)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
+
+    sessions = get_user_sessions(db, user_id)
+    for session in sessions:
+        deactivate_session(db, session)
+
+    return {"message": "사용자가 로그아웃되었습니다", "logged_out_sessions": len(sessions)}
+
 
 @router.post("/refresh", response_model=Token)
 def refresh_token(
@@ -220,11 +297,17 @@ def refresh_token(
 
     user = get_user_by_session_token(db, session_token)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="세션이 만료되었거나 비활성화되었습니다")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="세션이 만료되었거나 비활성화되었습니다",
+        )
 
     payload = verify_token(refresh_data.refresh_token, token_type="refresh")
     if str(payload.get("sub")) != str(user.user_id):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="토큰 정보가 일치하지 않습니다")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="토큰 정보가 일치하지 않습니다",
+        )
 
     access_token = create_access_token(data={"sub": str(user.user_id)})
     refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
@@ -248,6 +331,7 @@ def refresh_token(
 
     return Token(access_token=access_token, refresh_token=refresh_token)
 
+
 # @router.get("/me", response_model=UserResponse)
 # def get_me(current_user=Depends(get_current_active_user)):
 #     return current_user
@@ -262,7 +346,9 @@ def get_sessions(request: Request, db: Session = Depends(get_db)):
 
 
 @router.delete("/sessions/{session_id}")
-def revoke_session(session_id: int, request: Request, response: Response, db: Session = Depends(get_db)):
+def revoke_session(
+    session_id: int, request: Request, response: Response, db: Session = Depends(get_db)
+):
     user = validate_access_and_session(request, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
@@ -280,6 +366,48 @@ def revoke_session(session_id: int, request: Request, response: Response, db: Se
     return {"message": "세션이 종료되었습니다"}
 
 
+@router.post("/change-password")
+def change_password_endpoint(
+    change_req: ChangePasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """
+    사용자 비밀번호 변경 및 user_login 시간 업데이트
+    
+    - 현재 비밀번호 검증 후 새로운 비밀번호로 변경
+    - user_login이 null인 경우, 현재 시간으로 설정
+    - user_login이 이미 있는 경우, 새로운 로그인 시간으로 업데이트
+    """
+    # 사용자 확인
+    user = get_user_by_email(db, change_req.email)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
+    
+    if user.user_id != change_req.userId:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="사용자 ID가 일치하지 않습니다")
+    
+    # 비밀번호 변경 (현재 비밀번호 검증 포함)
+    login_time = change_req.user_login if change_req.user_login else datetime.now(timezone.utc)
+    updated_user = change_password(
+        db, 
+        user.user_id, 
+        change_req.current_password,
+        change_req.new_password, 
+        login_time
+    )
+    
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="현재 비밀번호가 올바르지 않습니다")
+    
+    return {
+        "message": "비밀번호가 성공적으로 변경되었습니다",
+        "id": updated_user.user_id,
+        "email": updated_user.user_email,
+        "user_login": updated_user.user_login,
+    }
+
+
 @router.post("/logout")
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
@@ -292,5 +420,3 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
     response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
     response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
     return {"message": "로그아웃 성공"}
-
-
