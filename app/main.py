@@ -3,7 +3,6 @@ import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
-
 from app.api.routes.auth import router as auth_router
 from app.db.database import engine
 

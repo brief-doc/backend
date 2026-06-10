@@ -1,11 +1,9 @@
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
