@@ -1,7 +1,8 @@
-# 모든 파일 무시
 
-!LLM/
-!.gitignore
+
+# 
+
+
 
 # Python
 __pycache__/
@@ -29,3 +30,8 @@ Thumbs.db
 
 # 개인 편집기 설정 (필요시 제외)
 .vscode/
+
+# 
+node_modules/
+package-lock.json
+package.json

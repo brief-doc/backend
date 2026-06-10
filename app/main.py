@@ -1,9 +1,11 @@
 import os
+
 import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.api.routes.auth import router as auth_router
+from app.api.routes.document import router as doc_router
 from app.db.database import engine
 
 app = FastAPI()
@@ -22,6 +24,7 @@ redis_client = redis.from_url(os.environ["REDIS_URL"])
 
 # include API routers
 app.include_router(auth_router)
+app.include_router(doc_router)  # /docs 대신 /documents로 변경
 
 
 @app.get("/")
