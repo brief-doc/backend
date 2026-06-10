@@ -29,7 +29,7 @@ VALUES(1,1),(1,2),(1,3),(2,1);
 
 -- ── 문서 (doc) ─────────────────────────────────────────────
 INSERT INTO public.doc
-    (doc_id, file_name, file_type, category, content_full, content_sum, created_at, updated_at, is_hidden, user_id)
+    (doc_id, file_name, file_type, category, content_full, content_sum, created_at, updated_at, is_deleted, user_id)
 OVERRIDING SYSTEM VALUE
 VALUES
     (1, '신규_공모사업_지침.pdf', 'pdf', '공모사업',
