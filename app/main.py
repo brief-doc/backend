@@ -1,22 +1,12 @@
 import asyncio
 import multiprocessing
 import os
-from concurrent.futures import ThreadPoolExecutor
-
-# Python 3.12+ 호환성: multiprocess RLock 에러 해결
-try:
-    multiprocessing.set_start_method("spawn", force=True)
-except RuntimeError:
-    # 이미 설정된 경우 무시
-    pass
-
 import redis
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from app.api.routes.auth import router as auth_router
-from app.api.routes.document import router as doc_router
 from app.db.database import engine
 
 from app.llm.config import CURRENT_MODEL, LLM_CONFIG
@@ -57,7 +47,6 @@ executor = ThreadPoolExecutor(max_workers=3)
 
 # include API routers
 app.include_router(auth_router)
-app.include_router(doc_router)  # /docs 대신 /documents로 변경
 
 
 # ── 기본 라우트 ────────────────────────────────────────────────────────────
