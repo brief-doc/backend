@@ -61,11 +61,11 @@ CREATE TABLE IF NOT EXISTS public.doc
     content_sum text COLLATE pg_catalog."default",    -- 요약본 (LLM 생성 / 지금은 Swagger로 채움)
     created_at timestamp with time zone,
     updated_at timestamp with time zone,
-    is_hidden boolean DEFAULT false,
+    is_deleted boolean DEFAULT false,
     user_id integer NOT NULL,
     CONSTRAINT doc_pkey PRIMARY KEY (doc_id)
 );
-COMMENT ON COLUMN public.doc.is_hidden IS '삭제여부';
+COMMENT ON COLUMN public.doc.is_deleted IS '삭제여부';
 
 CREATE TABLE IF NOT EXISTS public.job
 (

@@ -70,7 +70,7 @@ class Document(Base):
     content_sum = Column(Text)  # 요약본 (LLM 생성)
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))
-    is_hidden = Column(Boolean, server_default=text("false"))  # 삭제여부
+    is_deleted = Column(Boolean, server_default=text("false"))  # 삭제여부
     user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False)
 
     user = relationship("User", back_populates="documents")
