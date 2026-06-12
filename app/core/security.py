@@ -63,9 +63,9 @@ def get_access_token_from_request(request: Request) -> Optional[str]:
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)):
-    from crud.user import get_user
+    from app.services.auth_service import get_user
 
-    token = get_access_token_from_request(request)
+    token = request.cookies.get("access_token")
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
