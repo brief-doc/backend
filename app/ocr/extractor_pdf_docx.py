@@ -1,6 +1,6 @@
 """
 PDF / DOCX 추출기
- - PDF  : Docling (레이아웃) + pypdfium2 (텍스트) + EasyOCR (이미지/차트)
+ - PDF  : Docling (레이아웃) + pypdfium2 (텍스트) + paddleocr (이미지/차트)
  - DOCX : Docling (레이아웃 + 텍스트 + 표)
 
 """
@@ -8,11 +8,11 @@ PDF / DOCX 추출기
 import gc
 
 import cv2
-import easyocr
 import fitz
 import numpy as np
 import pypdfium2 as pdfium
 
+from app.ocr.paddleocr_engine import create_reader, preprocess_image, readtext_filtered
 from app.ocr.utils import BATCH_SIZE, OCR_ZOOM, SAVE_CROPS, clean_text
 
 
@@ -63,7 +63,6 @@ def crop_image(pdf_doc, item, padding=15):
             img = img[:, :, :3]
 
         img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        img_bgr = cv2.convertScaleAbs(img_bgr, alpha=1.3, beta=10)
         crop_filename = f"crop_page{page_no}_{bbox.l:.0f}_{bbox.b:.0f}.png"
 
         if SAVE_CROPS:
@@ -76,7 +75,7 @@ def crop_image(pdf_doc, item, padding=15):
         return None, None
 
 
-# ── EasyOCR 실행 ──────────────────────────────────────────────────────────────
+# ── PaddleOCR 실행 ──────────────────────────────────────────────────────────────
 def run_ocr(ocr, pdf_doc, item, label: str) -> str | None:
     page_no = item.prov[0].page_no
     img_bgr, crop_filename = crop_image(pdf_doc, item)
@@ -86,19 +85,18 @@ def run_ocr(ocr, pdf_doc, item, label: str) -> str | None:
         return None
 
     try:
-        img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-        results = ocr.readtext(img_rgb)
+        img_bgr = preprocess_image(img_bgr)
+        lines = readtext_filtered(ocr, img_bgr)
         img_bgr = img_rgb = None
         gc.collect()
 
-        lines = [text.strip() for (_, text, conf) in results if text.strip() and conf >= 0.4]
         extracted = clean_text("\n".join(lines))
 
         if extracted.strip():
             type_name = "차트/그래프" if label == "CHART" else "이미지"
             formatted = extracted.strip().replace("\n", "\n> ")
             print(f"  Page {page_no} [{label}] OCR 성공!")
-            return f"\n> **[{type_name} 내 텍스트] (Page {page_no})**\n> {formatted}\n\n"
+            return f"\n\n> {formatted}\n\n"
         else:
             msg = f"{crop_filename}" if SAVE_CROPS else "SAVE_CROPS=True 로 설정하면 확인 가능"
             print(f"  Page {page_no} [{label}] OCR 결과 없음 ({msg})")
@@ -130,7 +128,7 @@ def convert_pdf_batch(pdf_path: str, batch_pages: list):
 
 # ── PDF 처리 ──────────────────────────────────────────────────────────────────
 def process_pdf(pdf_path: str, page_filter: set = None) -> list[str]:
-    ocr = easyocr.Reader(["ko", "en"], gpu=False)
+    ocr = create_reader()
     pdf_doc = fitz.open(pdf_path)
     pdf_doc_pdfium = pdfium.PdfDocument(pdf_path)
     total_pages = len(pdf_doc_pdfium)
@@ -151,7 +149,14 @@ def process_pdf(pdf_path: str, page_filter: set = None) -> list[str]:
             gc.collect()
             continue
 
-        for item, level in doc.iterate_items():
+        all_items = list(doc.iterate_items())
+        all_items.sort(key=lambda x: (
+            x[0].prov[0].page_no if x[0].prov else float("inf"),
+            -x[0].prov[0].bbox.t if x[0].prov else 0,
+            x[0].prov[0].bbox.l if x[0].prov else 0,
+        ))
+
+        for item, level in all_items:
             label = item.label.name
 
             if page_filter:

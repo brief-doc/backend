@@ -1,12 +1,13 @@
 """
 HWP / HWPX 추출기
  - HWP/HWPX : rhwp-python (로컬, 한컴오피스 불필요)
- - 이미지 영역 : EasyOCR
+ - 이미지 영역 : paddleocr
 
 """
 
 import cv2
 
+from app.ocr.paddleocr_engine import create_reader, preprocess_image, readtext_filtered
 from app.ocr.utils import clean_text
 
 
@@ -92,14 +93,12 @@ def process_hwp(file_path: str, ocr_reader=None) -> list[str]:
                     img_bgr = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
                     if img_bgr is None:
                         return
-                    img_bgr = cv2.convertScaleAbs(img_bgr, alpha=1.3, beta=10)
-                    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
-                    results = ocr_reader.readtext(img_rgb)
-                    lines = [t.strip() for (_, t, conf) in results if t.strip() and conf >= 0.4]
+                    img_bgr = preprocess_image(img_bgr)
+                    lines = readtext_filtered(ocr_reader, img_bgr)
                     if lines:
                         text = clean_text("\n".join(lines))
                         formatted = text.replace("\n", "\n> ")
-                        blocks.append("\n> **[이미지 내 텍스트]**\n> " + formatted + "\n\n")
+                        blocks.append("\n\n " + formatted + "\n\n")
                 except Exception as img_e:
                     print("  이미지 OCR 실패: " + str(img_e))
 
@@ -130,11 +129,9 @@ def extract(file_path: str, **kwargs) -> str:
     """
     from pathlib import Path
 
-    import easyocr
-
     ext = Path(file_path).suffix.lower()
     if ext not in (".hwp", ".hwpx"):
         raise ValueError(f"지원하지 않는 포맷: {ext} (hwp, hwpx만 가능)")
 
-    ocr_reader = easyocr.Reader(["ko", "en"], gpu=False)
+    ocr_reader = create_reader()
     return "".join(process_hwp(file_path, ocr_reader=ocr_reader))
