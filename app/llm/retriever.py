@@ -1,56 +1,24 @@
+"""하이브리드 검색 + 크로스인코더 리랭킹 — LangChain BaseRetriever 구현
+
+LangChain LCEL 파이프라인에 바로 끼워 쓸 수 있습니다:
+    chain = get_retriever() | format_docs | prompt | llm | StrOutputParser()
+
+레고 교체:
+    - 벡터 스토어 교체 → vectorstore.py 의 get_vectorstore() 변경
+    - 리랭킹 모델 교체 → config.py 의 RERANKER_MODEL 변경
+    - BM25 비율 조정  → combined = α * bm25 + (1-α) * ce_scores 수정
+    - BM25 비활성화   → rank_bm25 미설치 시 자동 fallback
+
+선택적 패키지:
+    rank_bm25             → pip install rank-bm25
+    sentence_transformers → pip install sentence-transformers
 """
-하이브리드 검색 + 크로스인코더 리랭킹
 
-rank_bm25 미설치 시 → 벡터 검색만 사용 (자동 fallback)
-sentence_transformers 미설치 시 → 리랭킹 생략 (자동 fallback)
+from typing import Any
 
-⚠️ 중요: ingest.py 와 동일한 EMBEDDING_CONFIG 를 사용해야
-          저장/검색 벡터 공간이 일치합니다.
-"""
-
-import chromadb
 import numpy as np
 
-from .config import (
-    CHROMA_DB_PATH,
-    COLLECTION_NAME,
-    EMBEDDING_CONFIG,
-    RERANKER_MODEL,
-    TOP_K_FINAL,
-    TOP_K_RETRIEVE,
-)
-
-# chromadb HuggingFaceEmbeddingFunction 은 원격 HF API 를 호출하므로 사용 안 함
-# → langchain_huggingface 로컬 모델을 chromadb EF 인터페이스로 래핑해서 사용
-try:
-    from langchain_huggingface import HuggingFaceEmbeddings as _LCEmbeddings
-
-    class _STEmbeddingFunction:
-        """로컬 BGE-M3 모델을 chromadb EF 인터페이스로 래핑 (API 키 불필요)"""
-
-        def __init__(self):
-            self._model = _LCEmbeddings(
-                model_name=EMBEDDING_CONFIG["model_name"],
-                model_kwargs={"device": EMBEDDING_CONFIG.get("device", "cpu")},
-                encode_kwargs={
-                    "normalize_embeddings": EMBEDDING_CONFIG.get("normalize_embeddings", True)
-                },
-            )
-            print(f"[retriever] 로컬 임베딩 모델 로드: {EMBEDDING_CONFIG['model_name']}")
-
-        # chromadb 최신 버전이 요구하는 메서드
-        def name(self) -> str:
-            return f"local-{EMBEDDING_CONFIG['model_name'].replace('/', '-')}"
-
-        def __call__(self, input: list[str]) -> list:
-            return self._model.embed_documents(input)
-
-    _ST_OK = True
-except ImportError:
-    _ST_OK = False
-    print("[retriever] ❌ langchain_huggingface 없음 → pip install langchain-huggingface")
-
-# 선택적 패키지
+# ── 선택적 패키지 (langchain_chroma 보다 먼저 임포트해야 segfault 방지) ──────
 try:
     from rank_bm25 import BM25Okapi
 
@@ -59,131 +27,153 @@ except ImportError:
     _BM25_OK = False
     print("[retriever] rank_bm25 없음 → 벡터 검색만 사용 (pip install rank-bm25 권장)")
 
-try:
-    from sentence_transformers import CrossEncoder
+# ── CrossEncoder: chromadb + sentence_transformers 동시 로드 시 segfault 발생 ──
+# 두 라이브러리가 같은 프로세스에 공존하면 httpx HTTP 호출 시 메모리 충돌.
+# 리랭킹이 필요하면 ENABLE_RERANKER=true 환경변수로 명시적으로 활성화하세요.
+import os as _os
 
-    _CE_OK = True
-except ImportError:
+_RERANKER_ENABLED = _os.getenv("ENABLE_RERANKER", "false").lower() == "true"
+
+if _RERANKER_ENABLED:
+    try:
+        from sentence_transformers import CrossEncoder
+
+        _CE_OK = True
+    except ImportError:
+        _CE_OK = False
+        print("[retriever] sentence_transformers 없음 → 리랭킹 생략")
+else:
     _CE_OK = False
-    print("[retriever] sentence_transformers 없음 → 리랭킹 생략")
+    print("[retriever] CrossEncoder 비활성 (ENABLE_RERANKER=true 로 활성화 가능)")
 
-_retriever = None
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+from langchain_core.documents import Document
+from langchain_core.retrievers import BaseRetriever
+
+from .config import RERANKER_MODEL, TOP_K_FINAL, TOP_K_RETRIEVE
+from .vectorstore import get_vectorstore
+
+# CrossEncoder 싱글톤
+_reranker: "CrossEncoder | None" = None
 
 
-def get_retriever() -> "HybridRetriever":
-    global _retriever
-    if _retriever is None:
-        _retriever = HybridRetriever()
-    return _retriever
+def _get_reranker() -> "CrossEncoder | None":
+    global _reranker
+    if _reranker is None and _CE_OK:
+        _reranker = CrossEncoder(RERANKER_MODEL)
+    return _reranker
 
 
-class HybridRetriever:
-    def __init__(self):
-        # 로컬 BGE-M3 임베딩 함수 (API 키 불필요)
-        if not _ST_OK:
-            raise RuntimeError(
-                "langchain_huggingface 없음. pip install langchain-huggingface 실행하세요."
-            )
-        ef = _STEmbeddingFunction()
+def _normalize(arr: np.ndarray) -> np.ndarray:
+    span = arr.max() - arr.min()
+    return (arr - arr.min()) / (span + 1e-9)
 
-        client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
-        # 컬렉션 가져오기 (없으면 생성)
-        try:
-            self.col = client.get_collection(name=COLLECTION_NAME)
-        except Exception:
-            self.col = client.create_collection(name=COLLECTION_NAME)
-            print(f"[retriever] 컬렉션 '{COLLECTION_NAME}' 새로 생성")
+# ── LangChain BaseRetriever 구현 ──────────────────────────────────────────────
+class HybridRetriever(BaseRetriever):
+    """하이브리드(Vector + BM25) + CrossEncoder 리랭킹 Retriever
 
-        self._ef = ef
+    LangChain LCEL 인터페이스를 구현하므로 파이프라인에 직접 연결 가능합니다.
 
-        # 검색 방식 자동 결정: BGE-M3 테스트 쿼리로 차원 호환 여부 확인
-        self._use_texts = False  # 기본: BGE-M3 직접 임베딩
-        if self.col.count() > 0:
+    Attributes:
+        user_id: 사용자별 문서 필터 (None 이면 전체 문서 검색)
+    """
+
+    user_id: int | None = None
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    def _get_relevant_documents(
+        self,
+        query: str,
+        *,
+        run_manager: CallbackManagerForRetrieverRun,
+    ) -> list[Document]:
+        vs = get_vectorstore()
+        total = vs._collection.count()
+        print(f"[retriever] DB 총 청크 수: {total}, user_id={self.user_id}, 쿼리: {query[:60]!r}")
+
+        # user_id 필터: 정수·문자열 양쪽 시도 후 전체 폴백
+        filters_to_try: list[dict[str, Any] | None] = []
+        if self.user_id is not None:
+            filters_to_try.append({"user_id": int(self.user_id)})
+            filters_to_try.append({"user_id": str(self.user_id)})
+        filters_to_try.append(None)
+
+        docs: list[Document] = []
+        for f in filters_to_try:
             try:
-                test_emb = ef(["차원 테스트"])
-                self.col.query(query_embeddings=test_emb, n_results=1)
-                print(f"[retriever] BGE-M3 임베딩 검색 사용 (dim={len(test_emb[0])})")
-            except Exception as dim_err:
-                if "dimension" in str(dim_err).lower():
-                    self._use_texts = True
-                    print("[retriever] 차원 불일치 감지 -> chromadb 기본 임베딩으로 검색")
-                    print("[retriever] 권장: step4_rebuild_chromadb.py 로 BGE-M3 재구축")
-                else:
-                    raise
-
-        self.reranker = CrossEncoder(RERANKER_MODEL) if _CE_OK else None
-        mode = "hybrid" if _BM25_OK else "vector-only"
-        rerank = "+rerank" if self.reranker else ""
-        search = "query_texts" if self._use_texts else "BGE-M3"
-        print(f"[retriever] {mode} {rerank} | {search} | docs={self.col.count()}")
-
-    def _vector_search(self, query: str, n: int, user_id):
-        n_results = min(n, self.col.count() or 1)
-
-        # user_id 필터: 정수·문자열 양쪽 시도 (저장 시 타입이 다를 수 있음)
-        # 우선순위: user_id 일치 → 전체 문서 폴백
-        filters_to_try: list = []
-        if user_id is not None:
-            filters_to_try.append({"user_id": {"$eq": int(user_id)}})  # 정수
-            filters_to_try.append({"user_id": {"$eq": str(user_id)}})  # 문자열
-        filters_to_try.append(None)  # 최종 폴백: 필터 없이 전체 검색
-
-        def _run_query(where):
-            base_kwargs = {"n_results": n_results}
-            if where:
-                base_kwargs["where"] = where
-            if self._use_texts:
-                return self.col.query(query_texts=[query], **base_kwargs)
-            else:
-                return self.col.query(query_embeddings=self._ef([query]), **base_kwargs)
-
-        for where in filters_to_try:
-            try:
-                res = _run_query(where)
-                docs = res["documents"][0]
-                if docs:  # 결과가 있으면 즉시 반환
-                    if where is None and user_id is not None:
-                        print(f"[retriever] user_id={user_id} 필터 결과 없음 → 전체 문서 검색")
-                    return docs, res["metadatas"][0]
+                kwargs: dict[str, Any] = {"k": TOP_K_RETRIEVE}
+                if f is not None:
+                    kwargs["filter"] = f
+                results = vs.similarity_search(query, **kwargs)
+                print(f"[retriever] filter={f} → {len(results)}개")
+                if results:
+                    docs = results
+                    if f is None and self.user_id is not None:
+                        print(f"[retriever] user_id 필터 결과 없음 → 전체 검색 fallback")
+                    break
             except Exception as e:
-                print(f"[retriever] 쿼리 오류(where={where}): {e}")
+                print(f"[retriever] 쿼리 오류(filter={f}): {e}")
                 continue
 
-        return [], []
-
-    @staticmethod
-    def _normalize(arr: np.ndarray) -> np.ndarray:
-        span = arr.max() - arr.min()
-        return (arr - arr.min()) / (span + 1e-9)
-
-    def retrieve(self, query: str, user_id=None) -> tuple[list[str], list[dict]]:
-        docs, metas = self._vector_search(query, TOP_K_RETRIEVE, user_id)
         if not docs:
-            return [], []
+            print("[retriever] 검색 결과 없음")
+            return []
 
-        # BM25 점수 (설치된 경우)
+        doc_names = [d.metadata.get("doc_name") or d.metadata.get("file_name", "?") for d in docs]
+        print(f"[retriever] 검색된 문서: {doc_names}")
+
+        texts = [d.page_content for d in docs]
+
+        # ── BM25 점수 계산 ────────────────────────────────────────────────────
         if _BM25_OK:
             try:
-                tokenized = [d.split() for d in docs]
-                # 빈 토큰 문서 방지 (ZeroDivisionError 방지)
-                tokenized = [t if t else ["_empty_"] for t in tokenized]
-                bm25 = self._normalize(
-                    np.array(BM25Okapi(tokenized).get_scores(query.split() or ["_"]), dtype=float)
+                tokenized = [t.split() or ["_empty_"] for t in texts]
+                bm25_scores = _normalize(
+                    np.array(
+                        BM25Okapi(tokenized).get_scores(query.split() or ["_"]),
+                        dtype=float,
+                    )
                 )
             except Exception:
-                bm25 = np.ones(len(docs))
+                bm25_scores = np.ones(len(docs))
         else:
-            bm25 = np.ones(len(docs))  # 동일 가중치 fallback
+            bm25_scores = np.ones(len(docs))
 
-        # CrossEncoder 리랭킹 (설치된 경우)
-        if self.reranker:
-            ce = self._normalize(
-                np.array(self.reranker.predict([[query, d] for d in docs]), dtype=float)
+        # ── CrossEncoder 리랭킹 ───────────────────────────────────────────────
+        reranker = _get_reranker()
+        if reranker:
+            ce_scores = _normalize(
+                np.array(
+                    reranker.predict([[query, t] for t in texts]),
+                    dtype=float,
+                )
             )
-            combined = 0.3 * bm25 + 0.7 * ce
+            combined = 0.3 * bm25_scores + 0.7 * ce_scores
         else:
-            combined = bm25  # BM25만 또는 동일 가중치
+            combined = bm25_scores
 
         top_idx = np.argsort(combined)[::-1][:TOP_K_FINAL]
-        return [docs[i] for i in top_idx], [metas[i] for i in top_idx]
+        return [docs[i] for i in top_idx]
+
+
+# ── 팩토리 함수 ───────────────────────────────────────────────────────────────
+_default_retriever: HybridRetriever | None = None
+
+
+def get_retriever(user_id: int | None = None) -> HybridRetriever:
+    """HybridRetriever 반환.
+
+    user_id 없으면 싱글톤을 반환하고,
+    user_id 있으면 필터가 적용된 새 인스턴스를 반환합니다.
+    """
+    global _default_retriever
+    if user_id is not None:
+        return HybridRetriever(user_id=user_id)
+    if _default_retriever is None:
+        _default_retriever = HybridRetriever()
+        mode = "hybrid" if _BM25_OK else "vector-only"
+        rerank = "+rerank" if _CE_OK else ""
+        print(f"[retriever] {mode}{rerank} 초기화 완료")
+    return _default_retriever

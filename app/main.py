@@ -3,11 +3,9 @@ import multiprocessing
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-# Python 3.12+ 호환성: multiprocess RLock 에러 해결
-try:
-    multiprocessing.set_start_method("spawn", force=True)
-except RuntimeError:
-    pass  # 이미 설정된 경우 무시
+# sentence_transformers Rust 토크나이저 병렬 처리 → segfault 방지
+# 반드시 다른 모든 import 보다 먼저 설정해야 함
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import redis
 from fastapi import FastAPI, File, Form, UploadFile
@@ -17,9 +15,18 @@ from sqlalchemy import text
 from app.api.routes.auth import router as auth_router
 from app.api.routes.document import router as document_router
 from app.db.database import engine
-
 from app.llm.config import CURRENT_MODEL, LLM_CONFIG
 from app.llm.pipeline import invalidate_cache, run_query
+
+# ── 서버 시작 시 메인 스레드에서 무거운 모델 미리 로드 ─────────────────────────
+# 임베딩·벡터스토어를 스레드에서 처음 초기화하면 segfault 발생 → 미리 초기화
+try:
+    from app.llm.vectorstore import get_vectorstore
+
+    get_vectorstore()
+    print("[startup] 벡터스토어 초기화 완료")
+except Exception as _e:
+    print(f"[startup] 벡터스토어 초기화 실패 (계속 진행): {_e}")
 
 # ── 앱 설정 ────────────────────────────────────────────────────────────────
 app = FastAPI(
@@ -39,9 +46,7 @@ app.add_middleware(
 # ── 인프라 연결 ────────────────────────────────────────────────────────────
 # engine은 app.db.database에서 이미 설정됨 (재생성 X)
 try:
-    redis_client = redis.from_url(
-        os.environ.get("REDIS_URL", "redis://localhost:6379")
-    )
+    redis_client = redis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
 except Exception as e:
     print(f"[Redis] 연결 실패: {e}")
     redis_client = None
@@ -86,13 +91,24 @@ def counter():
     return {"visits": redis_client.incr("visits")}
 
 
+# ── 캐시 무효화 ────────────────────────────────────────────────────────────
+@app.post("/invalidate-cache/")
+def invalidate_cache_endpoint(user_id: int = Form(default=0)):
+    """RAG 쿼리 캐시를 삭제합니다.
+    새 문서 업로드 후 이전 검색 결과가 계속 나올 때 호출하세요.
+    user_id=0 이면 전체 캐시 삭제, 특정 값이면 해당 사용자 캐시만 삭제.
+    """
+    uid = user_id if user_id != 0 else None
+    deleted = invalidate_cache(uid)
+    return {"status": "success", "deleted": deleted, "user_id": uid or "전체"}
+
+
 # ── PDF 업로드 & 요약 ───────────────────────────────────────────────────────
 @app.post("/upload-and-summarize/")
 async def upload_and_summarize(
     file: UploadFile = File(...),
     doc_id: int = Form(...),
     user_id: int = Form(...),
-    # 법령·조례 / 가이드라인·지침 / 공모·사업 / 감사 / 내부 규정 / 기타
     category: str = Form(default="기타"),
 ):
     """
@@ -101,8 +117,7 @@ async def upload_and_summarize(
     """
     import uuid
 
-    from langchain_community.document_loaders import PyPDFLoader
-
+    from app.llm.ingest import _load_pdf as _pdf_loader
     from app.llm.ingest import ingest_pdf
     from app.llm.summarizer import summarize_document
 
@@ -118,16 +133,21 @@ async def upload_and_summarize(
         f.write(content)
 
     try:
-        # 1. PDF 텍스트 추출
-        docs = PyPDFLoader(tmp).load()
-        if not docs:
-            return {"status": "error", "detail": "PDF에서 텍스트 추출 실패"}
+        # 1. PDF 텍스트 추출 (pdfplumber 우선, 실패 시 pypdf)
+        _pdf_docs = _pdf_loader(tmp)
+        doc_text = "\n\n".join(d.page_content for d in _pdf_docs).strip()
 
-        # 전체 텍스트 사용 (긴 문서는 summarizer 내부에서 Map-Reduce 처리)
-        doc_text = "\n\n".join(d.page_content for d in docs)
+        if not doc_text or len(doc_text) < 20:
+            return {
+                "status": "error",
+                "detail": (
+                    "PDF에서 텍스트를 추출할 수 없습니다. "
+                    "스캔 이미지형 PDF이거나 암호화된 PDF일 수 있습니다."
+                ),
+            }
 
         # 2. 카테고리별 요약
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         summary_result = await loop.run_in_executor(
             executor,
             lambda: summarize_document(doc_text, category),
@@ -153,7 +173,6 @@ async def upload_and_summarize(
     except Exception as e:
         return {"status": "error", "detail": str(e)}
     finally:
-        # tmp_ 접두어 파일만 삭제
         if "tmp" in tmp and os.path.exists(tmp):
             try:
                 os.remove(tmp)
@@ -178,7 +197,7 @@ async def summarize_markdown(
     if not markdown_text.strip():
         return {"status": "error", "detail": "마크다운 내용이 비어있습니다."}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     # 1. 카테고리별 요약
     try:
@@ -192,6 +211,7 @@ async def summarize_markdown(
 
     # 2. ChromaDB 저장 (선택)
     chunks_saved = 0
+    ingest_error = ""
     if save_to_db:
         try:
             result = await loop.run_in_executor(
@@ -207,8 +227,12 @@ async def summarize_markdown(
                 ),
             )
             chunks_saved = result.get("total_chunks", 0)
+            if result.get("status") == "error":
+                ingest_error = result.get("detail", "알 수 없는 오류")
+                print(f"[ingest] 저장 실패: {ingest_error}")
         except Exception as e:
-            print(f"[ingest] 저장 실패: {e}")
+            ingest_error = str(e)
+            print(f"[ingest] 저장 실패(예외): {e}")
 
     if chunks_saved > 0:
         invalidate_cache(user_id)
@@ -220,6 +244,7 @@ async def summarize_markdown(
         "category": category,
         "summary": summary,
         "chunks_saved": chunks_saved,
+        "ingest_error": ingest_error if ingest_error else None,
     }
 
 
@@ -247,7 +272,6 @@ async def upload_and_summarize_md(
     if not content_bytes:
         return {"status": "error", "detail": "빈 파일입니다."}
 
-    # UTF-8 디코딩 (BOM 처리 포함)
     try:
         markdown_text = content_bytes.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -256,9 +280,9 @@ async def upload_and_summarize_md(
     if not markdown_text.strip():
         return {"status": "error", "detail": "파일 내용이 비어 있습니다."}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
-    # 1. 전체 텍스트 요약 (Map-Reduce 자동 적용)
+    # 1. 전체 텍스트 요약
     try:
         summary_result = await loop.run_in_executor(
             executor,
@@ -310,7 +334,7 @@ async def query_documents(
     if not question.strip():
         return {"status": "error", "detail": "질문을 입력해주세요."}
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         executor,
         lambda: run_query(question.strip(), user_id or None, cat_id or None),
@@ -323,7 +347,6 @@ async def query_documents(
         "status": "success",
         "question": question,
         "answer": result["answer"],
-        "references": result["references"],
     }
 
 
@@ -339,3 +362,13 @@ def health_llm():
         return {"status": "ok", "models": models, "current_model": CURRENT_MODEL}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+if __name__ == "__main__":
+    try:
+        multiprocessing.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+    import uvicorn
+
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
