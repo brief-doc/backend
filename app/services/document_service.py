@@ -1,14 +1,14 @@
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
-
+from datetime import datetime, timezone
 from app.db.models import Document, Job
-from app.schemas.document import DocResponse
+from app.schemas.document import DocResponse, DocUpdate
 
 
 # 문서 목록 조회(최신 작업 상태와 함께)
 def get_docs_with_latest_job(
     db: Session,
-    user_id: int | None = None,
+    user_id: int,
     category: str | None = None,
     skip: int = 0,
     limit: int = 50,
@@ -17,11 +17,12 @@ def get_docs_with_latest_job(
         db.query(Document, Job)
         .join(Job, Job.doc_id == Document.doc_id)
         .distinct(Document.doc_id)
-        .filter(Document.is_hidden.is_(False))
+        .filter(
+            Document.user_id == user_id,    
+            Document.is_deleted.is_(False)
+        )
     )
 
-    if user_id is not None:
-        query = query.filter(Document.user_id == user_id)
     if category is not None:
         query = query.filter(Document.category == category)
 
@@ -41,3 +42,62 @@ def get_docs_with_latest_job(
         )
         for doc, job in results
     ]
+
+# 문서 상세 조회
+def get_docs_detail(
+    db: Session,
+    doc_id: int,
+    user_id: int,
+):
+    doc_detail = (
+        db.query(Document)
+        .filter(
+            Document.user_id == user_id,    
+            Document.is_deleted.is_(False),
+            Document.doc_id == doc_id,
+            #완료 상태만 조회 가능
+        ).first()   
+    )
+    
+    return doc_detail;
+
+
+# 문서 삭제
+def soft_delete_doc(
+    db: Session,
+    doc_id: int,
+    user_id: int,
+        
+):
+    doc = (
+        db.query(Document)
+        .filter(
+            Document.doc_id == doc_id,
+            Document.user_id == user_id,
+            Document.is_deleted.is_(False)
+        )
+        .first()
+
+    )
+    if not doc:
+        return False
+    
+    doc.is_deleted = True
+
+    db.commit()
+    return True
+
+
+def update_doc(db: Session, doc_id: int, user_id: int, payload: DocUpdate):
+    doc = get_docs_detail(db, doc_id, user_id)
+    if not doc:
+        return None
+
+    data = payload.model_dump(exclude_unset=True)
+    for key, value in data.items():
+        setattr(doc, key, value)
+
+    doc.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(doc)
+    return doc
