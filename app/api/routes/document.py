@@ -1,29 +1,44 @@
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.document import DocResponse, DocDetail, DocUpdate
+from app.schemas.document import DocResponse, DocDetail, DocUpdate, PaginatedDocResponse
 from app.services import document_service as doc_service
 from app.core.security import get_current_user
 
 router = APIRouter(prefix="/documents", tags=["docs"])
 
 # 1. 전체 조회(Soft Delete된 것은 제외)
-@router.get("/", response_model=list[DocResponse])
+@router.get("/", response_model=PaginatedDocResponse)
 def list_documents(
     category: str | None = None,
+    keyword: str | None = Query(None),
+    sort_by: str = Query("created_at"),
     skip: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
     current_user = Depends(get_current_user),
 ):
-    return doc_service.get_docs_with_latest_job(
+    # 서비스단에서 전체 개수와 목록을 함께 받아옴
+    total_count, docs = doc_service.get_docs_with_latest_job(
         db,
         user_id=current_user.user_id,
         category=category,
+        keyword=keyword, 
+        sort_by=sort_by,
         skip=skip,
         limit=limit,
     )
+    
+    # 계산식으로 현재 페이지 역산 (skip = (page-1)*limit 이므로)
+    current_page = (skip // limit) + 1
+
+    return {
+        "items": docs,
+        "total_count": total_count,
+        "page": current_page,
+        "limit": limit
+    }
 
 # 2. 단건 상세 조회
 @router.get("/{doc_id}", response_model=DocDetail)
