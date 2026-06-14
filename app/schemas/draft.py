@@ -8,14 +8,16 @@ class DraftCreate(BaseModel):
     title: str
     content: str
     source_doc_id: Optional[int] = None
-    action: Literal["save", "submit"]  # save → draft, submit → pending
+    approver_id: Optional[int] = None
+    action: Literal["save", "submit"]
 
 
 class DraftUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     source_doc_id: Optional[int] = None
-    action: Optional[Literal["save", "submit"]] = None  # 반려 후 재상신 시 submit
+    approver_id: Optional[int] = None
+    action: Optional[Literal["save", "submit"]] = None
 
 
 # 목록 조회용 (대시보드) — 최소 필드만
@@ -56,3 +58,48 @@ class PaginatedDraftResponse(BaseModel):
     total_count: int
     page: int
     limit: int
+
+
+# ── 결재자 전용 스키마 ──────────────────────────────────────────────────────────
+
+class ApprovalListItem(BaseModel):
+    draft_id: int
+    title: str
+    author_name: str
+    created_at: datetime
+    status: str
+
+
+class ApprovalDetail(BaseModel):
+    draft_id: int
+    title: str
+    content: str
+    status: str
+    author_id: int
+    author_name: str
+    approver_id: Optional[int] = None
+    reject_reason: Optional[str] = None
+    decided_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+    source_doc_id: Optional[int] = None
+    source_doc_name: Optional[str] = None
+    source_doc_summary: Optional[str] = None
+
+
+class PaginatedApprovalResponse(BaseModel):
+    items: list[ApprovalListItem]
+    total_count: int
+    page: int
+    limit: int
+
+
+class DecisionRequest(BaseModel):
+    action: Literal["approved", "rejected"]
+    reject_reason: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_reject_reason(self) -> "DecisionRequest":
+        if self.action == "rejected" and not (self.reject_reason or "").strip():
+            raise ValueError("반려 시 사유를 입력해야 합니다.")
+        return self

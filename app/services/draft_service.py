@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
-from app.db.models import Draft
+from app.db.models import Document, Draft, User
 from app.schemas.draft import DraftCreate, DraftUpdate
 
 KST = timezone(timedelta(hours=9))
@@ -18,6 +18,7 @@ def create_draft(db: Session, author_id: int, payload: DraftCreate) -> Draft:
         title=payload.title,
         content=payload.content,
         source_doc_id=payload.source_doc_id,
+        approver_id=payload.approver_id,
         status=status,
         created_at=_now(),
         updated_at=_now(),
@@ -99,6 +100,98 @@ def update_draft(
     elif action == "save":
         draft.status = "draft"
 
+    draft.updated_at = _now()
+    db.commit()
+    db.refresh(draft)
+    return draft
+
+
+def get_approval_list(
+    db: Session,
+    approver_id: int,
+    skip: int = 0,
+    limit: int = 3,
+) -> tuple[int, list[dict]]:
+    query = (
+        db.query(Draft, User)
+        .join(User, Draft.author_id == User.user_id)
+        .filter(Draft.approver_id == approver_id, Draft.status == "pending")
+        .order_by(Draft.created_at.desc())
+    )
+    total = query.count()
+    rows = query.offset(skip).limit(limit).all()
+    items = [
+        {
+            "draft_id": d.draft_id,
+            "title": d.title,
+            "author_name": u.user_name or u.user_email,
+            "created_at": d.created_at,
+            "status": d.status,
+        }
+        for d, u in rows
+    ]
+    return total, items
+
+
+def get_approval_detail(db: Session, draft_id: int, approver_id: int) -> dict | None:
+    row = (
+        db.query(Draft, User)
+        .join(User, Draft.author_id == User.user_id)
+        .filter(Draft.draft_id == draft_id, Draft.approver_id == approver_id)
+        .first()
+    )
+    if not row:
+        return None
+    draft, author = row
+    source_doc_name = None
+    source_doc_summary = None
+    if draft.source_doc_id:
+        doc = db.query(Document).filter(Document.doc_id == draft.source_doc_id).first()
+        if doc:
+            source_doc_name = doc.file_name
+            source_doc_summary = doc.content_sum
+    return {
+        "draft_id": draft.draft_id,
+        "title": draft.title,
+        "content": draft.content,
+        "status": draft.status,
+        "author_id": draft.author_id,
+        "author_name": author.user_name or author.user_email,
+        "approver_id": draft.approver_id,
+        "reject_reason": draft.reject_reason,
+        "decided_at": draft.decided_at,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
+        "source_doc_id": draft.source_doc_id,
+        "source_doc_name": source_doc_name,
+        "source_doc_summary": source_doc_summary,
+    }
+
+
+def process_decision(
+    db: Session,
+    draft_id: int,
+    approver_id: int,
+    action: str,
+    reject_reason: str | None = None,
+) -> Draft | None:
+    draft = (
+        db.query(Draft)
+        .filter(
+            Draft.draft_id == draft_id,
+            Draft.approver_id == approver_id,
+            Draft.status == "pending",
+        )
+        .first()
+    )
+    if not draft:
+        return None
+    draft.status = action
+    if action == "rejected":
+        draft.reject_reason = reject_reason
+    else:
+        draft.reject_reason = None
+    draft.decided_at = _now()
     draft.updated_at = _now()
     db.commit()
     db.refresh(draft)
