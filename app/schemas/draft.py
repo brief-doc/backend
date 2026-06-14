@@ -8,6 +8,7 @@ class DraftCreate(BaseModel):
     title: str
     content: str
     source_doc_id: Optional[int] = None
+    approver_id: Optional[int] = None  # 결재권자 지정
     action: Literal["save", "submit"]  # save → draft, submit → pending
 
 
@@ -15,6 +16,7 @@ class DraftUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     source_doc_id: Optional[int] = None
+    approver_id: Optional[int] = None  # 결재권자 변경
     action: Optional[Literal["save", "submit"]] = None  # 반려 후 재상신 시 submit
 
 

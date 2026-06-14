@@ -18,6 +18,7 @@ def create_draft(db: Session, author_id: int, payload: DraftCreate) -> Draft:
         title=payload.title,
         content=payload.content,
         source_doc_id=payload.source_doc_id,
+        approver_id=payload.approver_id,
         status=status,
         created_at=_now(),
         updated_at=_now(),

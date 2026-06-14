@@ -15,9 +15,11 @@ from sqlalchemy import text
 from app.api.routes.auth import router as auth_router
 from app.api.routes.document import router as document_router
 from app.api.routes.draft_router import router as draft_router
-from app.db.database import engine
+from app.api.routes.notification_router import router as notification_router
+from app.db.database import engine, get_db
 from app.llm.config import CURRENT_MODEL, LLM_CONFIG
 from app.llm.pipeline import invalidate_cache, run_query
+from app.services import notification_service
 
 # ── 서버 시작 시 메인 스레드에서 무거운 모델 미리 로드 ─────────────────────────
 # 임베딩·벡터스토어를 스레드에서 처음 초기화하면 segfault 발생 → 미리 초기화
@@ -59,6 +61,12 @@ executor = ThreadPoolExecutor(max_workers=3)
 app.include_router(auth_router)
 app.include_router(document_router)
 app.include_router(draft_router)
+app.include_router(notification_router)
+
+
+@app.on_event("startup")
+async def startup_event():
+    notification_service.set_loop(asyncio.get_running_loop())
 
 
 # ── 기본 라우트 ────────────────────────────────────────────────────────────
@@ -164,6 +172,19 @@ async def upload_and_summarize(
         # 4. 새 문서 추가됐으므로 RAG 캐시 무효화
         invalidate_cache(user_id)
 
+        # 5. 요약 완료 알림
+        try:
+            db = next(get_db())
+            notification_service.create_notification(
+                db=db,
+                user_id=user_id,
+                message=f"'{file.filename}' 문서 요약이 완료되었습니다.",
+                domain_type="SUMMARY",
+                resource_id=doc_id,
+            )
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "doc_id": doc_id,
@@ -239,6 +260,19 @@ async def summarize_markdown(
     if chunks_saved > 0:
         invalidate_cache(user_id)
 
+    # 요약 완료 알림
+    try:
+        db = next(get_db())
+        notification_service.create_notification(
+            db=db,
+            user_id=user_id,
+            message=f"'{doc_name}' 문서 요약이 완료되었습니다.",
+            domain_type="SUMMARY",
+            resource_id=doc_id,
+        )
+    except Exception:
+        pass
+
     return {
         "status": "success",
         "doc_id": doc_id,
@@ -313,6 +347,19 @@ async def upload_and_summarize_md(
             invalidate_cache(user_id)
         except Exception as e:
             print(f"[ingest_md] 저장 실패: {e}")
+
+    # 요약 완료 알림
+    try:
+        db = next(get_db())
+        notification_service.create_notification(
+            db=db,
+            user_id=user_id,
+            message=f"'{filename}' 문서 요약이 완료되었습니다.",
+            domain_type="SUMMARY",
+            resource_id=doc_id,
+        )
+    except Exception:
+        pass
 
     return {
         "status": "success",
