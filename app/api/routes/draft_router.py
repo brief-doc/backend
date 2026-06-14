@@ -9,7 +9,7 @@ from app.schemas.draft import (
     DraftDetail,
     PaginatedDraftResponse,
 )
-from app.services import draft_service
+from app.services import draft_service, notification_service
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -20,7 +20,19 @@ def create_draft(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return draft_service.create_draft(db, author_id=current_user.user_id, payload=payload)
+    draft = draft_service.create_draft(db, author_id=current_user.user_id, payload=payload)
+    if payload.action == "submit":
+        try:
+            notification_service.create_notification(
+                db=db,
+                user_id=current_user.user_id,
+                message=f"'{draft.title}' 기안이 상신되었습니다.",
+                domain_type="APPROVAL",
+                resource_id=draft.draft_id,
+            )
+        except Exception:
+            pass
+    return draft
 
 
 @router.get("/", response_model=PaginatedDraftResponse)
@@ -77,6 +89,17 @@ def update_draft(
 
     if not draft:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="기안을 찾을 수 없습니다.")
+    if payload.action == "submit":
+        try:
+            notification_service.create_notification(
+                db=db,
+                user_id=current_user.user_id,
+                message=f"'{draft.title}' 기안이 상신되었습니다.",
+                domain_type="APPROVAL",
+                resource_id=draft.draft_id,
+            )
+        except Exception:
+            pass
     return draft
 
 
