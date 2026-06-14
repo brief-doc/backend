@@ -99,8 +99,13 @@ class Job(Base):
     job_finish = Column(TIMESTAMP(timezone=False))
     doc_id = Column(Integer, ForeignKey("doc.doc_id"), index=True)
     user_id = Column(Integer, ForeignKey("users.user_id"))
-    job_type = Column(String)  # summarize / embed / batch
-    job_status = Column(String)  # pending / running / success / failed
+    job_type = Column(String)  # summarize / embed / batch / document_pipeline
+    job_status = Column(String)  # pending / running / success / failed / completed / cancelled
+    pipeline_stage = Column(String, nullable=True)   # uploaded/ocr/embedding/summarizing/completed
+    is_cancelled = Column(Boolean, nullable=True)     # 취소 요청 플래그
+    file_path = Column(String, nullable=True)         # 임시 파일 경로
+    error_stage = Column(String, nullable=True)       # 실패 발생 단계
+    error_message = Column(Text, nullable=True)       # 실패 상세 메시지
 
     user = relationship("User", back_populates="jobs")
     document = relationship("Document", back_populates="jobs")
