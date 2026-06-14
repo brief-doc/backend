@@ -78,6 +78,11 @@ def _push_sync(user_id: int, payload: dict) -> None:
         _loop.call_soon_threadsafe(_user_queues[user_id].put_nowait, payload)
 
 
+def push_event(user_id: int, payload: dict) -> None:
+    """알림 이외의 실시간 이벤트(진행률 등)를 SSE 큐로 전송."""
+    _push_sync(user_id, payload)
+
+
 # ── DB 조회 / 읽음 처리 ────────────────────────────────────────────────────────
 
 def get_notifications(
