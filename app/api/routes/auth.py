@@ -28,6 +28,7 @@ from app.services.auth_service import (
     get_user_sessions,
     get_users,
     reset_user_password,
+    update_user_activation,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -55,6 +56,8 @@ class UserListResponse(BaseModel):
     roles: List[str] = []
     user_login: Optional[datetime] = None
     user_create: Optional[datetime] = None
+    user_update: Optional[datetime] = None
+    is_deleted: bool
 
     class Config:
         from_attributes = True
@@ -182,7 +185,7 @@ def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
     if not current or "관리자" not in _role_names(current):
         raise HTTPException(status_code=403, detail="계정 생성 권한이 없습니다.")
 
-    if get_user_by_email(db, user.email):
+    if get_user_by_email(db, user.email, is_new=True):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이미 존재하는 이메일입니다")
     new_user = create_user(db, user)
     return {
@@ -214,9 +217,8 @@ def login(
     db: Session = Depends(get_db),
 ):
     user = get_user_by_email(db, login_data.email)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="이메일 없다")
-    if not verify_password(login_data.password, user.user_password):
+
+    if not user or not verify_password(login_data.password, user.user_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="이메일 또는 비밀번호가 올바르지 않습니다",
@@ -277,6 +279,9 @@ def list_users(request: Request, db: Session = Depends(get_db)):
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
+    if "관리자" not in _role_names(current_user):
+        raise HTTPException(status_code=403, detail="권한이 없습니다.")
+
     users = get_users(db)
     return [
         {
@@ -286,9 +291,41 @@ def list_users(request: Request, db: Session = Depends(get_db)):
             "roles": _role_names(user),
             "user_login": user.user_login,
             "user_create": user.created_at,  # 모델 컬럼명이 created_at으로 변경됨
+            "user_update": user.updated_at,  # 모델 컬럼명이 user_update으로 변경됨
+            "is_deleted": user.is_deleted,
         }
         for user in users
     ]
+
+
+class ActivationRequest(BaseModel):
+    is_deleted: bool
+
+
+@router.patch("/users/{user_id}/activation")
+def toggle_user_activation(user_id: int, payload: ActivationRequest, request: Request, db: Session = Depends(get_db)):
+    """
+    Endpoint to activate/deactivate users. Restricted to Admin role only.
+    """
+    # 1. Verify admin is logged in
+    current_user = validate_access_and_session(request, db)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
+
+    if "관리자" not in _role_names(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="관리자 권한이 필요합니다")
+
+    # 2. Prevent admins from deactivating themselves accidentally
+    if current_user.user_id == user_id and payload.is_deleted:
+        raise HTTPException(status_code=400, detail="본인 계정은 비활성화할 수 없습니다.")
+
+    # 3. Update status
+    updated_user = update_user_activation(db, user_id, payload.is_deleted)
+    if not updated_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
+
+    action = "비활성화" if payload.is_deleted else "활성화"
+    return {"message": f"사용자가 성공적으로 {action}되었습니다."}
 
 
 @router.get("/users/activity", response_model=UserActivityResponse)

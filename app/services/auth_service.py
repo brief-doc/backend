@@ -12,8 +12,14 @@ def get_user(db: Session, id: int):
     return db.query(User).filter(User.user_id == id).first()
 
 
-def get_user_by_email(db: Session, email: str):
-    return db.query(User).filter(User.user_email == email).first()
+def get_user_by_email(db: Session, email: str, is_new: bool = False):
+    print(f"=== DB 조회 시도 이메일: [{email}] ===")
+    print(f"=== 신규: [{is_new}] ===")
+    query = db.query(User).filter(User.user_email == email)
+    if is_new == False:  # noqa: E712
+        # Only return the user if they are NOT deleted
+        query = query.filter(User.is_deleted == False)  # noqa: E712
+    return query.first()
 
 
 def get_users(db: Session, skip: int = 0, limit: int = 100):
@@ -153,6 +159,29 @@ def change_password(db: Session, user_id: int, current_password: str, new_passwo
     user.user_password = hash_password(new_password)
     user.user_login = user_login or datetime.now(timezone.utc)
     user.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_activation(db: Session, user_id: int, is_deleted: bool):
+    """
+    Deactivate (is_deleted=True) or Reactivate (is_deleted=False) a user account.
+    """
+    # Fetch user including deleted ones so we can reactivate them
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        return None
+
+    user.is_deleted = is_deleted
+    user.updated_at = datetime.now(timezone.utc)
+
+    # Optional Security Measure: If deactivating, force terminate their active sessions
+    if is_deleted:
+        sessions = get_user_sessions(db, user_id)
+        for session in sessions:
+            session.is_active = False
 
     db.commit()
     db.refresh(user)

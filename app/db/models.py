@@ -40,6 +40,7 @@ class User(Base):
     created_at = Column(TIMESTAMP(timezone=True))
     updated_at = Column(TIMESTAMP(timezone=True))
     user_login = Column(TIMESTAMP(timezone=True))  # 최종 로그인 시간
+    is_deleted = Column(Boolean, server_default=text("false"))  # 삭제 여부
 
     # 관계
     sessions = relationship("UserSession", back_populates="user")
