@@ -12,6 +12,7 @@ from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+from app.api.routes.admin_router import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.document import router as document_router
 from app.api.routes.document_pipeline_router import router as document_pipeline_router
@@ -62,6 +63,7 @@ executor = ThreadPoolExecutor(max_workers=3)
 
 # include API routers
 app.include_router(auth_router)
+app.include_router(admin_router)
 app.include_router(user_router)
 app.include_router(document_router)
 app.include_router(draft_router)
