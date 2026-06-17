@@ -40,10 +40,11 @@ def _role_names(user) -> List[str]:
 
 
 class UserResponse(BaseModel):
-    id: int  # ID는 Integer입니다.
+    id: int
     email: str
-    name: str  # username 대신 name 사용
-    roles: List[str] = []  # user_rank(단일 등급) → roles(다중 역할)
+    name: str
+    roles: List[str] = []
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -134,6 +135,7 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
             "email": user.user_email,
             "name": user.user_name,
             "roles": _role_names(user),
+            "created_at": user.created_at,
         }
 
     session_token = request.cookies.get("session_token")
@@ -171,6 +173,7 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
             "email": user.user_email,
             "name": user.user_name,
             "roles": _role_names(user),
+            "created_at": user.created_at,
         }
     except HTTPException:
         response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
