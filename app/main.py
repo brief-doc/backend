@@ -7,11 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 # 반드시 다른 모든 import 보다 먼저 설정해야 함
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+# psycopg2 + langchain/chromadb 임포트 순서 충돌(segfault) 방지
+# app.llm 계열(chromadb·langchain)을 psycopg2(SQLAlchemy)보다 반드시 먼저 로드해야 함
 import redis
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+import app.llm  # noqa: F401, E402
 from app.api.routes.admin_router import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.document import router as document_router
