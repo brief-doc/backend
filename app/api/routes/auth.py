@@ -14,7 +14,6 @@ from app.core.security import (
     verify_token,
 )
 from app.db.database import get_db
-from app.db.models import Draft, RagQuery
 from app.schemas.user import RefreshTokenRequest, Token, UserCreate
 from app.services.auth_service import (
     change_password,
@@ -22,7 +21,6 @@ from app.services.auth_service import (
     create_user_session,
     deactivate_session,
     get_session_by_id,
-    get_user,
     get_user_by_email,
     get_user_by_session_token,
     get_user_session_by_token,
@@ -75,32 +73,6 @@ class SessionResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-class ActivityUserDetail(BaseModel):
-    name: str
-    email: str
-    roles: List[str]
-    joinDate: Optional[str] = None
-
-
-class RagQueryItem(BaseModel):
-    query_id: int
-    query_text: str
-    created_at: datetime
-
-
-class DraftItem(BaseModel):
-    draft_id: int
-    title: str
-    status: str
-    created_at: datetime
-
-
-class UserActivityResponse(BaseModel):
-    user: ActivityUserDetail
-    rag_queries: List[RagQueryItem] = []
-    drafts: List[DraftItem] = []
 
 
 def validate_access_and_session(request: Request, db: Session):
@@ -324,51 +296,6 @@ def toggle_user_activation(user_id: int, payload: ActivationRequest, request: Re
 
     action = "비활성화" if payload.is_deleted else "활성화"
     return {"message": f"사용자가 성공적으로 {action}되었습니다."}
-
-
-@router.get("/users/activity", response_model=UserActivityResponse)
-def get_user_activity(
-    request: Request,
-    user_id: Optional[int] = None,  # 💡 Query Parameter나 Path Parameter로 선택적 수신
-    db: Session = Depends(get_db),
-):
-    # 1. 현재 로그인한 사용자 검증 (이전 세션 검증 함수 활용)
-    current_user = validate_access_and_session(request, db)
-    if not current_user:
-        raise HTTPException(status_code=401, detail="인증되지 않은 사용자입니다.")
-
-    current_roles = [ur.role.role_name for ur in current_user.user_roles]
-
-    # 2. 로직 분기 처리
-    if user_id is not None:
-        # 타인의 ID를 조회하려는 경우 -> 오직 '관리자'만 허용
-        if "관리자" not in current_roles:
-            raise HTTPException(status_code=403, detail="타인의 활동 내역을 조회할 권한이 없습니다.")
-        target_user_id = user_id
-    else:
-        # user_id가 누락된 경우 -> 일반 유저가 '내 정보'를 요청한 것으로 간주
-        target_user_id = current_user.user_id
-
-    # 3. target_user_id 기반으로 DB 조회
-    user_info = get_user(db, target_user_id)
-    user_roles = _role_names(user_info)
-
-    join_date = user_info.created_at.strftime("%Y.%m.%d") if user_info.created_at else None
-
-    rag_queries = db.query(RagQuery).filter(RagQuery.user_id == target_user_id).order_by(RagQuery.created_at.desc()).limit(10).all()
-
-    drafts = db.query(Draft).filter(Draft.author_id == target_user_id).order_by(Draft.created_at.desc()).limit(10).all()
-
-    return {
-        "user": {
-            "name": user_info.user_name,
-            "email": user_info.user_email,
-            "roles": user_roles,
-            "joinDate": join_date,
-        },
-        "rag_queries": [{"query_id": q.query_id, "query_text": q.query_text, "created_at": q.created_at} for q in rag_queries],
-        "drafts": [{"draft_id": d.draft_id, "title": d.title, "status": d.status, "created_at": d.created_at} for d in drafts],
-    }
 
 
 @router.post("/users/{user_id}/reset-password")
