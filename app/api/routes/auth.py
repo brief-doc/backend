@@ -14,6 +14,7 @@ from app.core.security import (
     verify_token,
 )
 from app.db.database import get_db
+from app.db.models import Draft, RagQuery
 from app.schemas.user import RefreshTokenRequest, Token, UserCreate
 from app.services.auth_service import (
     change_password,
@@ -80,29 +81,26 @@ class ActivityUserDetail(BaseModel):
     name: str
     email: str
     roles: List[str]
-    joinDate: Optional[str] = "2025.03.15"
+    joinDate: Optional[str] = None
 
 
 class RagQueryItem(BaseModel):
-    id: int
-    query: str
-    timestamp: str
-    tokensUsed: Optional[int] = None
+    query_id: int
+    query_text: str
+    created_at: datetime
 
 
 class DraftItem(BaseModel):
-    id: int
+    draft_id: int
     title: str
-    type: str
-    date: str
     status: str
-    statusLabel: str
+    created_at: datetime
 
 
 class UserActivityResponse(BaseModel):
     user: ActivityUserDetail
-    # ragQueries: List[RagQueryItem]
-    # drafts: List[DraftItem]
+    rag_queries: List[RagQueryItem] = []
+    drafts: List[DraftItem] = []
 
 
 def validate_access_and_session(request: Request, db: Session):
@@ -351,16 +349,25 @@ def get_user_activity(
         # user_id가 누락된 경우 -> 일반 유저가 '내 정보'를 요청한 것으로 간주
         target_user_id = current_user.user_id
 
-    # 3. target_user_id를 기반으로 DB에서 질의 이력 및 결재 문서 조회 및 가공
-    # queries = db.query(RAGQuery).filter(RAGQuery.user_id == target_user_id).all()
-    # drafts = db.query(Document).filter(Document.user_id == target_user_id).all()
+    # 3. target_user_id 기반으로 DB 조회
     user_info = get_user(db, target_user_id)
     user_roles = _role_names(user_info)
 
+    join_date = user_info.created_at.strftime("%Y.%m.%d") if user_info.created_at else None
+
+    rag_queries = db.query(RagQuery).filter(RagQuery.user_id == target_user_id).order_by(RagQuery.created_at.desc()).limit(10).all()
+
+    drafts = db.query(Draft).filter(Draft.author_id == target_user_id).order_by(Draft.created_at.desc()).limit(10).all()
+
     return {
-        "user": {"name": user_info.user_name, "email": user_info.user_email, "roles": user_roles},
-        # "ragQueries": queries,
-        # "drafts": drafts
+        "user": {
+            "name": user_info.user_name,
+            "email": user_info.user_email,
+            "roles": user_roles,
+            "joinDate": join_date,
+        },
+        "rag_queries": [{"query_id": q.query_id, "query_text": q.query_text, "created_at": q.created_at} for q in rag_queries],
+        "drafts": [{"draft_id": d.draft_id, "title": d.title, "status": d.status, "created_at": d.created_at} for d in drafts],
     }
 
 
