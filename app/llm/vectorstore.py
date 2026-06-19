@@ -29,6 +29,8 @@ def get_vectorstore() -> Chroma:
             persist_directory=CHROMA_DB_PATH,
             embedding_function=get_embeddings(),
             collection_name=COLLECTION_NAME,
+            # 코사인 거리 사용 (정규화된 BGE-M3 임베딩에 적합, 거리 범위 0~2)
+            collection_metadata={"hnsw:space": "cosine"},
         )
         count = _instance._collection.count()
         print(f"[vectorstore] 초기화 완료 — 컬렉션: {COLLECTION_NAME}, 저장 청크 수: {count}")
