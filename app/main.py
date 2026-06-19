@@ -7,11 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 # 반드시 다른 모든 import 보다 먼저 설정해야 함
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+# psycopg2 + langchain/chromadb 임포트 순서 충돌(segfault) 방지
+# app.llm 계열(chromadb·langchain)을 psycopg2(SQLAlchemy)보다 반드시 먼저 로드해야 함
 import redis
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+import app.llm  # noqa: F401, E402
 from app.api.routes.admin_router import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.document import router as document_router
@@ -130,18 +133,18 @@ async def upload_and_summarize(
     category: str = Form(default="기타"),
 ):
     """
-    PDF를 업로드하면 카테고리별 형식으로 요약합니다.
+    문서를 업로드하면 카테고리별 형식으로 요약합니다. (PDF·HWP·HWPX·DOCX·DOC 지원)
     category: 법령·조례 / 가이드라인·지침 / 공모·사업 / 감사 / 내부 규정 / 기타
     """
     import uuid
 
-    from app.llm.ingest import _load_pdf as _pdf_loader
-    from app.llm.ingest import ingest_pdf
+    from app.llm.ingest import ingest_markdown
     from app.llm.summarizer import summarize_document
+    from app.ocr.extractor import process_document
 
-    pdf_dir = os.path.join(os.getcwd(), "pdf_files")
-    os.makedirs(pdf_dir, exist_ok=True)
-    tmp = os.path.join(pdf_dir, f"tmp_{uuid.uuid4().hex}_{file.filename}")
+    upload_dir = os.path.join(os.getcwd(), "pdf_files")
+    os.makedirs(upload_dir, exist_ok=True)
+    tmp = os.path.join(upload_dir, f"tmp_{uuid.uuid4().hex}_{file.filename}")
 
     content = await file.read()
     if not content:
@@ -151,18 +154,17 @@ async def upload_and_summarize(
         f.write(content)
 
     try:
-        # 1. PDF 텍스트 추출 (pdfplumber 우선, 실패 시 pypdf)
-        _pdf_docs = _pdf_loader(tmp)
-        doc_text = "\n\n".join(d.page_content for d in _pdf_docs).strip()
+        # 1. OCR 텍스트 추출 (PDF·HWP·DOCX 등 모든 형식 지원)
+        loop = asyncio.get_running_loop()
+        doc_text: str = await loop.run_in_executor(executor, lambda: process_document(tmp))
 
-        if not doc_text or len(doc_text) < 20:
+        if not doc_text or len(doc_text.strip()) < 20:
             return {
                 "status": "error",
-                "detail": ("PDF에서 텍스트를 추출할 수 없습니다. 스캔 이미지형 PDF이거나 암호화된 PDF일 수 있습니다."),
+                "detail": "텍스트를 추출할 수 없습니다. 스캔 이미지이거나 암호화된 파일일 수 있습니다.",
             }
 
         # 2. 카테고리별 요약
-        loop = asyncio.get_running_loop()
         summary_result = await loop.run_in_executor(
             executor,
             lambda: summarize_document(doc_text, category),
@@ -171,7 +173,7 @@ async def upload_and_summarize(
         # 3. ChromaDB에 벡터 저장
         ingest_result = await loop.run_in_executor(
             executor,
-            lambda: ingest_pdf(tmp, doc_id, user_id, doc_name=file.filename, category=category),
+            lambda: ingest_markdown(doc_text, doc_id, user_id, doc_name=file.filename, category=category),
         )
 
         # 4. 새 문서 추가됐으므로 RAG 캐시 무효화
