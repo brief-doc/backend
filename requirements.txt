@@ -35,9 +35,9 @@ python-multipart
 # ocr
 paddlepaddle==3.0.0
 paddleocr
+paddlex[ocr]
 opencv-python
 pymupdf
 pypdfium2
 docling
-rhwp-python
 llama-parse

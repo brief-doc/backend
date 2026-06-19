@@ -60,14 +60,8 @@ class TransformersEmbeddings(Embeddings):
         self.pooling = pooling
 
         print(f"[embeddings] 모델 로드: {model_name} (device={device})")
-        self._tokenizer = AutoTokenizer.from_pretrained(
-            model_name,
-            local_files_only=True,
-        )
-        self._model = AutoModel.from_pretrained(
-            model_name,
-            local_files_only=True,
-        )
+        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self._model = AutoModel.from_pretrained(model_name)
         self._model.eval()
         if device != "cpu":
             try:

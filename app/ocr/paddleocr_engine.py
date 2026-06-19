@@ -31,13 +31,17 @@ def readtext_filtered(reader: PaddleOCR, img_bgr, conf_threshold: float = 0.4) -
 # ── 1. 이미지 전처리 ────────────────────────────────────────────────────────
 
 
-def preprocess(img_path: str) -> np.ndarray:
+def preprocess(img_path_or_arr) -> np.ndarray:
     """
     PPStructureV3용 전처리.
     헤더(어두운 배경+흰 글씨)와 본문(밝은 배경+검정 글씨)을
     로컬 배경 밝기 기반으로 선택 반전하여 모두 검정 글씨+흰 배경으로 통일.
+    파일 경로(str) 또는 BGR ndarray 둘 다 입력 가능.
     """
-    img = cv2.imread(img_path)
+    if isinstance(img_path_or_arr, np.ndarray):
+        img = img_path_or_arr
+    else:
+        img = cv2.imread(img_path_or_arr)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
 
@@ -150,7 +154,7 @@ def print_block_summary(parsing_res_list: list):
 # ── 4. 블록 → 마크다운 변환 ────────────────────────────────────────────────
 
 # 텍스트가 없거나 OCR 불가능한 블록 (건너뜀)
-SKIP_LABELS = {"figure", "figure_caption", "formula", "chart", "seal", "unknown"}
+SKIP_LABELS = {"figure", "figure_caption", "formula", "seal"}
 
 
 def blocks_to_markdown(parsing_res_list: list) -> str:
@@ -168,6 +172,8 @@ def blocks_to_markdown(parsing_res_list: list) -> str:
 
         if label == "table":
             lines.append(html_table_to_markdown(content))
+        elif label == "chart":
+            lines.append(content)
         elif label == "doc_title":
             lines.append(f"# {content}")
         elif "title" in label:
@@ -211,18 +217,27 @@ def extract(file_path: str) -> str:
         use_chart_recognition=False,
         use_seal_recognition=False,
     )
-    results = pipeline.predict(preprocessed)
+    results = list(pipeline.predict(preprocessed))
+    print(f"[DEBUG] preprocessed shape: {preprocessed.shape if preprocessed is not None else 'None'}")
+    print(f"[DEBUG] results 개수: {len(results)}")
+    print(f"[DEBUG] results type: {type(results)}")
 
     all_pages_md = []
     for res in results:
+        print("하이")
+        print(f"  [DEBUG] res keys: {list(res.keys()) if isinstance(res, dict) else type(res)}")
         parsing_res_list = res.get("parsing_res_list", [])
+        print(f"  [DEBUG] parsing_res_list 길이: {len(parsing_res_list)}")
+        print_block_summary(parsing_res_list)
+        for b in parsing_res_list:
+            print(f"  label={b.label!r}  content={repr(str(b.content)[:80])}")
         if not parsing_res_list:
             continue
-        has_table = any(b.label == "table" for b in parsing_res_list)
-        if has_table:
-            page_md = blocks_to_markdown(parsing_res_list)
-        else:
-            page_md = res.get("markdown_texts", "")
+        # 표 유무와 관계없이 항상 블록 단위로 마크다운 변환
+        page_md = blocks_to_markdown(parsing_res_list)
+        # 블록 변환 실패 시 PPStructureV3 자체 markdown 키로 폴백
+        if not page_md:
+            page_md = res.get("markdown", "") or res.get("markdown_texts", "")
         if page_md:
             all_pages_md.append(page_md)
 
@@ -235,11 +250,29 @@ def extract(file_path: str) -> str:
 # ── 7. 메인 ─────────────────────────────────────────────────────────────────
 
 
+def pdf_page_to_image(pdf_path: str, page_no: int = 1) -> np.ndarray:
+    import fitz
+
+    doc = fitz.open(pdf_path)
+    page = doc.load_page(page_no - 1)
+    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+    if pix.n == 4:
+        img = img[:, :, :3]
+    doc.close()
+    return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+
 def main():
     img_path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).parent / "test2.pdf")
+    page_no = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 
-    print(f"[1/3] 이미지 전처리: {img_path}")
-    preprocessed = preprocess(img_path)
+    print(f"[1/3] 전처리: {img_path}  (페이지 {page_no})")
+    if Path(img_path).suffix.lower() == ".pdf":
+        preprocessed = pdf_page_to_image(img_path, page_no)
+        print(f"  → PDF 페이지 {page_no}를 이미지로 변환: shape={preprocessed.shape}")
+    else:
+        preprocessed = preprocess(img_path)
 
     print("[2/3] PPStructureV3 실행 중...")
     pipeline = PPStructureV3(
@@ -263,14 +296,7 @@ def main():
         print(f"── 페이지 {page_idx + 1} ──")
         print_block_summary(parsing_res_list)
 
-        has_table = any(b.label == "table" for b in parsing_res_list)
-
-        if has_table:
-            print("  → 표 블록 감지: 블록 단위 변환 사용")
-            page_md = blocks_to_markdown(parsing_res_list)
-        else:
-            print("  → 표 없음: full_md 방식 사용")
-            page_md = res.get("markdown_texts", "")
+        page_md = blocks_to_markdown(parsing_res_list)
 
         print()
         if page_md:

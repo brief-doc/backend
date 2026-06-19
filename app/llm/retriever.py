@@ -93,17 +93,17 @@ class HybridRetriever(BaseRetriever):
         total = vs._collection.count()
         print(f"[retriever] DB 총 청크 수: {total}, user_id={self.user_id}, 쿼리: {query[:60]!r}")
 
-        # user_id 필터: 정수·문자열 양쪽 시도 후 전체 폴백
+        # user_id 필터: 문자열 우선 시도 (ingest에서 str로 저장) → 정수 → 전체 폴백
         filters_to_try: list[dict[str, Any] | None] = []
         if self.user_id is not None:
-            filters_to_try.append({"user_id": int(self.user_id)})
             filters_to_try.append({"user_id": str(self.user_id)})
+            filters_to_try.append({"user_id": int(self.user_id)})
         filters_to_try.append(None)
 
         docs: list[Document] = []
         for f in filters_to_try:
             try:
-                kwargs: dict[str, Any] = {"k": TOP_K_RETRIEVE}
+                kwargs: dict[str, Any] = {"k": min(TOP_K_RETRIEVE, max(total, 1))}
                 if f is not None:
                     kwargs["filter"] = f
                 results = vs.similarity_search(query, **kwargs)
@@ -116,6 +116,14 @@ class HybridRetriever(BaseRetriever):
             except Exception as e:
                 print(f"[retriever] 쿼리 오류(filter={f}): {e}")
                 continue
+
+        # 마지막 수단: 필터 없이 전체 검색 (위 루프에서 None 필터도 실패한 경우)
+        if not docs and total > 0:
+            try:
+                docs = vs.similarity_search(query, k=min(TOP_K_RETRIEVE, total))
+                print(f"[retriever] 비상 fallback(필터 전부 제거) → {len(docs)}개")
+            except Exception as e:
+                print(f"[retriever] 비상 fallback 오류: {e}")
 
         if not docs:
             print("[retriever] 검색 결과 없음")

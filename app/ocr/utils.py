@@ -23,6 +23,6 @@ def clean_text(text: str) -> str:
     lines = text.splitlines()
     cleaned = []
     for line in lines:
-        line = line.strip()
+        line = line.strip().replace("~", "\\~")
         cleaned.append(line) if line else cleaned.append("")
     return "\n".join(cleaned)
