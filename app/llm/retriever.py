@@ -126,13 +126,12 @@ class HybridRetriever(BaseRetriever):
         # 마지막 수단: 필터 없이 전체 검색 (위 루프에서 None 필터도 실패한 경우)
         if not docs and total > 0:
             try:
-        feature/retriever-score-threshold
                 results_with_score = vs.similarity_search_with_score(query, k=min(TOP_K_RETRIEVE, total))
                 docs = [doc for doc, score in results_with_score if score <= SCORE_THRESHOLD]
                 print(f"[retriever] 비상 fallback → 임계값 통과 {len(docs)}개")
-      
-                docs = vs.similarity_search(query, k=min(TOP_K_RETRIEVE, total))
-                print(f"[retriever] 비상 fallback(필터 전부 제거) → {len(docs)}개"
+
+            except Exception as e:
+                print(f"[retriever] 비상 fallback 오류: {e}")
 
         if not docs:
             print("[retriever] 검색 결과 없음")
