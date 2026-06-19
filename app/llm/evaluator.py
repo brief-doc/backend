@@ -96,12 +96,14 @@ def evaluate_rag(
             sample_kw["reference"] = ground_truths[i]  # type: ignore[index]
 
         samples.append(SingleTurnSample(**sample_kw))
-        per_question.append({
-            "question": question,
-            "answer": answer,
-            "contexts_count": len(contexts),
-            "ground_truth": ground_truths[i] if has_gt else None,  # type: ignore[index]
-        })
+        per_question.append(
+            {
+                "question": question,
+                "answer": answer,
+                "contexts_count": len(contexts),
+                "ground_truth": ground_truths[i] if has_gt else None,  # type: ignore[index]
+            }
+        )
 
     dataset = EvaluationDataset(samples=samples)
 
@@ -127,10 +129,7 @@ def evaluate_rag(
     skip_cols = {"user_input", "response", "retrieved_contexts", "reference"}
     score_cols = [c for c in result_df.columns if c not in skip_cols]
 
-    avg_metrics = {
-        col: _safe_round(result_df[col].mean())
-        for col in score_cols
-    }
+    avg_metrics = {col: _safe_round(result_df[col].mean()) for col in score_cols}
     for i, row in result_df.iterrows():
         for col in score_cols:
             per_question[i][col] = _safe_round(row[col])  # type: ignore[index]

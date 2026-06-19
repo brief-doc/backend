@@ -96,9 +96,9 @@ def process_hwp(file_path: str, pipeline=None) -> list[str]:
                     results = list(pipeline.predict(img_bgr))
                     img_bgr = None
                     for res in results:
-                        md = blocks_to_markdown(res.get('parsing_res_list', []))
+                        md = blocks_to_markdown(res.get("parsing_res_list", []))
                         if md:
-                            blocks.append(md + '\n\n')
+                            blocks.append(md + "\n\n")
                 except Exception as img_e:
                     print("  이미지 OCR 실패: " + str(img_e))
 
@@ -134,7 +134,7 @@ def extract(file_path: str, **kwargs) -> str:
         raise ValueError(f"지원하지 않는 포맷: {ext} (hwp, hwpx만 가능)")
 
     pipeline = PPStructureV3(
-        lang='korean',
+        lang="korean",
         use_table_recognition=True,
         use_formula_recognition=False,
         use_chart_recognition=False,

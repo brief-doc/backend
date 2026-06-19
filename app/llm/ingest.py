@@ -120,13 +120,7 @@ def ingest_markdown(
         return {"status": "error", "detail": "청킹 결과 없음"}
 
     for i, chunk in enumerate(chunks):
-        section = (
-            chunk.metadata.get("section")
-            or chunk.metadata.get("h1")
-            or chunk.metadata.get("h2")
-            or chunk.metadata.get("h3")
-            or "본문"
-        )
+        section = chunk.metadata.get("section") or chunk.metadata.get("h1") or chunk.metadata.get("h2") or chunk.metadata.get("h3") or "본문"
         chunk.metadata = _build_metadata(doc_id, user_id, doc_name, category, i)
         chunk.metadata["section"] = section
 

@@ -6,6 +6,7 @@ import chromadb
 
 from .config import CHROMA_DB_PATH, DB_CONFIG
 
+
 #
 def check_chromadb():
     """ChromaDB 저장 현황 출력"""
