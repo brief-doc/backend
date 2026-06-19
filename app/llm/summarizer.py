@@ -85,7 +85,7 @@ def classify_document_category(doc_text: str) -> str:
         "민사법" | "행정법" | "형사법" | "지식재산권"
     """
     valid = list(SUMMARY_TEMPLATES.keys())
-    sample = doc_text[:2000].strip()
+    sample = doc_text[:CHUNK_SIZE].strip()
     try:
         result = (CLASSIFY_PROMPT | get_summary_llm() | _parser).invoke({"text": sample})
         classified = result.strip()
@@ -125,7 +125,7 @@ def summarize_document(doc_text: str, category: str) -> dict:
             "message": "원문이 비어 있습니다.",
         }
 
-    resolved = category if category in SUMMARY_TEMPLATES else list(SUMMARY_TEMPLATES.keys())[0]
+    resolved = category if category in SUMMARY_TEMPLATES else classify_document_category(doc_text)
 
     try:
         chunks = _splitter.split_text(doc_text)

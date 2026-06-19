@@ -45,7 +45,7 @@ HF_LLM_CONFIG = {
 # ── 요약 전용 LLM 설정 (속도 우선) ───────────────────────────────────────────
 SUMMARY_LLM_CONFIG = {
     **LLM_CONFIG,
-    "temperature": 0.0,
+    "temperature": 0.1,
     "num_ctx": int(os.getenv("SUMMARY_NUM_CTX", "2048")),
     "num_predict": int(os.getenv("SUMMARY_NUM_PREDICT", "300")),
 }

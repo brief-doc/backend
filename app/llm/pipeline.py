@@ -19,6 +19,7 @@
 """
 
 import hashlib
+from collections import Counter
 from datetime import datetime
 
 import psycopg2
@@ -161,7 +162,19 @@ def run_query(
     answer_text = (RAG_PROMPT | get_llm() | StrOutputParser()).invoke({"context": context, "question": question})
     print(f"[pipeline] LLM 응답: {answer_text[:300]}")
 
-    # 3. references 구성
+    # 3. 카테고리 자동 감지 (문서 메타데이터 다수결 → LLM 폴백)
+    meta_categories = [doc.metadata.get("category", "") for doc in docs if doc.metadata.get("category")]
+    if meta_categories:
+        detected_category = Counter(meta_categories).most_common(1)[0][0]
+    else:
+        try:
+            from .summarizer import classify_document_category
+
+            detected_category = classify_document_category(question)
+        except Exception:
+            detected_category = ""
+
+    # 4. references 구성
     references = [
         {
             "doc_name": doc.metadata.get("doc_name") or doc.metadata.get("file_name", "?"),
@@ -172,7 +185,7 @@ def run_query(
         for doc in docs
     ]
 
-    result = {"status": "success", "answer": answer_text, "references": references}
+    result = {"status": "success", "answer": answer_text, "category": detected_category, "references": references}
 
     # 4. 캐시 저장
     _cache_data[key] = result

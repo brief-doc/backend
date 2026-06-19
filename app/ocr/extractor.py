@@ -53,23 +53,28 @@ def process_document(file_path: str, pages: list = None) -> str:
         from app.ocr.extractor_pdf_docx import extract
 
         if ext == ".pdf":
-            print("  엔진: Docling + pypdfium2 + EasyOCR")
+            print("  엔진: Docling + pypdfium2 + paddleocr")
         else:
             print("  엔진: Docling")
-        return extract(file_path, pages=pages)
+        result = extract(file_path, pages=pages)
+        print(result)
+        return result
+        # return extract(file_path, pages=pages)
 
     # ── DOC ───────────────────────────────────────────────────────────────────
     elif ext == ".doc":
         from app.ocr.extractor_doc import extract
 
         print("  엔진: LlamaParse")
-        return extract(file_path)
+        result = extract(file_path)
+        print(result)
+        return result
 
     # ── HWP / HWPX ───────────────────────────────────────────────────────────
     elif ext in (".hwp", ".hwpx"):
         from app.ocr.extractor_hwp import extract
 
-        print("  엔진: rhwp-python + EasyOCR")
+        print("  엔진: rhwp-python + paddleocr")
         return extract(file_path)
 
     # ── 이미지 ────────────────────────────────────────────────────────────────
@@ -97,8 +102,8 @@ if __name__ == "__main__":
 
     if markdown:
         print(f"\n--- 추출 결과 미리보기 ({len(markdown):,} chars) ---")
-        print(markdown[:500])
-        print("..." if len(markdown) > 500 else "")
+        print(markdown)
+        # print("..." if len(markdown) > 500 else "")
 
         out = Path(path).with_suffix(".md").name
         Path(out).write_text(markdown, encoding="utf-8")
