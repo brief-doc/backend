@@ -164,7 +164,7 @@ def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
         "id": new_user.user_id,
         "email": new_user.user_email,
         "name": new_user.user_name,
-        "roles": _role_names(new_user), 
+        "roles": _role_names(new_user),
     }
 
 
@@ -255,9 +255,7 @@ def list_approvers(request: Request, db: Session = Depends(get_db)):
     return [
         {"id": u.user_id, "name": u.user_name}
         for u in users
-        if not u.is_deleted
-        and u.user_id != current_user.user_id
-        and any(ur.role.role_name == "결재권자" for ur in u.user_roles)
+        if not u.is_deleted and u.user_id != current_user.user_id and any(ur.role.role_name == "결재권자" for ur in u.user_roles)
     ]
 
 
@@ -278,7 +276,7 @@ def list_users(request: Request, db: Session = Depends(get_db)):
             "name": user.user_name,
             "roles": _role_names(user),
             "user_login": user.user_login,
-            "user_create": user.created_at,  
+            "user_create": user.created_at,
             "user_update": user.updated_at,
             "is_deleted": user.is_deleted,
         }
