@@ -34,7 +34,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _role_names(user) -> List[str]:
-    """user_role 연결을 통해 이 유저가 가진 역할 이름 목록을 반환."""
     return [ur.role.role_name for ur in user.user_roles]
 
 
@@ -165,7 +164,7 @@ def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
         "id": new_user.user_id,
         "email": new_user.user_email,
         "name": new_user.user_name,
-        "roles": _role_names(new_user),  # 갓 가입한 유저는 보통 []
+        "roles": _role_names(new_user), 
     }
 
 
@@ -246,6 +245,22 @@ def login(
     }
 
 
+@router.get("/approvers")
+def list_approvers(request: Request, db: Session = Depends(get_db)):
+    current_user = validate_access_and_session(request, db)
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
+
+    users = get_users(db)
+    return [
+        {"id": u.user_id, "name": u.user_name}
+        for u in users
+        if not u.is_deleted
+        and u.user_id != current_user.user_id
+        and any(ur.role.role_name == "결재권자" for ur in u.user_roles)
+    ]
+
+
 @router.get("/users", response_model=List[UserListResponse])
 def list_users(request: Request, db: Session = Depends(get_db)):
     current_user = validate_access_and_session(request, db)
@@ -263,8 +278,8 @@ def list_users(request: Request, db: Session = Depends(get_db)):
             "name": user.user_name,
             "roles": _role_names(user),
             "user_login": user.user_login,
-            "user_create": user.created_at,  # 모델 컬럼명이 created_at으로 변경됨
-            "user_update": user.updated_at,  # 모델 컬럼명이 user_update으로 변경됨
+            "user_create": user.created_at,  
+            "user_update": user.updated_at,
             "is_deleted": user.is_deleted,
         }
         for user in users
