@@ -13,6 +13,12 @@ class DraftCreate(BaseModel):
     approver_id: Optional[int] = None
     action: Literal["save", "submit"]
 
+    @model_validator(mode="after")
+    def approver_required_on_submit(self):
+        if self.action == "submit" and not self.approver_id:
+            raise ValueError("상신 시 결재권자를 지정해야 합니다.")
+        return self
+
 
 class DraftUpdate(BaseModel):
     title: Optional[str] = None
@@ -20,6 +26,12 @@ class DraftUpdate(BaseModel):
     source_doc_id: Optional[int] = None
     approver_id: Optional[int] = None
     action: Optional[Literal["save", "submit"]] = None
+
+    @model_validator(mode="after")
+    def approver_required_on_submit(self):
+        if self.action == "submit" and not self.approver_id:
+            raise ValueError("상신 시 결재권자를 지정해야 합니다.")
+        return self
 
 
 # 목록 조회용 (대시보드) — 최소 필드만
