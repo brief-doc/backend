@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from app.core.security import hash_password
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.db.models import User, UserSession
+from app.core.security import hash_password, verify_password
+from app.db.models import Role, User, UserRole, UserSession
 from app.schemas.user import UserCreate
 
 
@@ -11,8 +12,14 @@ def get_user(db: Session, id: int):
     return db.query(User).filter(User.user_id == id).first()
 
 
-def get_user_by_email(db: Session, email: str):
-    return db.query(User).filter(User.user_email == email).first()
+def get_user_by_email(db: Session, email: str, is_new: bool = False):
+    print(f"=== DB 조회 시도 이메일: [{email}] ===")
+    print(f"=== 신규: [{is_new}] ===")
+    query = db.query(User).filter(User.user_email == email)
+    if is_new == False:  # noqa: E712
+        # Only return the user if they are NOT deleted
+        query = query.filter(User.is_deleted == False)  # noqa: E712
+    return query.first()
 
 
 def get_users(db: Session, skip: int = 0, limit: int = 100):
@@ -73,18 +80,49 @@ def deactivate_session(db: Session, session: UserSession):
     return session
 
 
+DEFAULT_ROLE_NAME = "실무 담당자"
+
+
 def create_user(db: Session, user: UserCreate):
     db_user = User(
         user_email=user.email,
         user_password=hash_password(user.password),
-        user_rank=1,
         user_name=user.name,
-        user_create=datetime.now(),
+        created_at=datetime.now(timezone.utc),  # user_rank 제거, user_create → created_at
     )
     db.add(db_user)
+    db.flush()  # commit 전에 db_user.user_id를 확보 (FK에 필요)
+
+    if not user.roles:
+        role_names = [DEFAULT_ROLE_NAME]
+    else:
+        role_names = user.roles
+
+    roles = db.query(Role).filter(Role.role_name.in_(role_names)).all()
+    missing = set(role_names) - {r.role_name for r in roles}
+    if missing:
+        raise HTTPException(status_code=400, detail=f"존재하지 않는 역할: {', '.join(missing)}")
+
+    for r in roles:
+        db.add(UserRole(user_id=db_user.user_id, role_id=r.role_id))
+
     db.commit()
     db.refresh(db_user)
     return db_user
+
+
+def reset_user_password(db: Session, user_id: int, password: str = "000000"):
+    user = get_user(db, user_id)
+    if not user:
+        return None
+
+    user.user_password = hash_password(password)
+    user.user_login = None
+    user.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def delete_user(db: Session, id: int):
@@ -94,3 +132,57 @@ def delete_user(db: Session, id: int):
     db.delete(db_user)
     db.commit()
     return db_user
+
+
+def change_password(db: Session, user_id: int, current_password: str, new_password: str, user_login: datetime | None = None):
+    """
+    사용자 비밀번호 변경 및 user_login 시간 업데이트
+
+    Args:
+        db: Database session
+        user_id: 사용자 ID
+        current_password: 현재 비밀번호 (평문)
+        new_password: 새로운 비밀번호 (평문)
+        user_login: 로그인 시간 (기본값: 현재 시간)
+
+    Returns:
+        업데이트된 User 객체 또는 None (현재 비밀번호 불일치 시)
+    """
+    user = get_user(db, user_id)
+    if not user:
+        return None
+
+    # 현재 비밀번호 검증
+    if not verify_password(current_password, user.user_password):
+        return None
+
+    user.user_password = hash_password(new_password)
+    user.user_login = user_login or datetime.now(timezone.utc)
+    user.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(user)
+    return user
+
+
+def update_user_activation(db: Session, user_id: int, is_deleted: bool):
+    """
+    Deactivate (is_deleted=True) or Reactivate (is_deleted=False) a user account.
+    """
+    # Fetch user including deleted ones so we can reactivate them
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if not user:
+        return None
+
+    user.is_deleted = is_deleted
+    user.updated_at = datetime.now(timezone.utc)
+
+    # Optional Security Measure: If deactivating, force terminate their active sessions
+    if is_deleted:
+        sessions = get_user_sessions(db, user_id)
+        for session in sessions:
+            session.is_active = False
+
+    db.commit()
+    db.refresh(user)
+    return user

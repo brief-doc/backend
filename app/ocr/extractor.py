@@ -2,19 +2,26 @@
 문서 추출 진입점
 확장자 확인 후 적절한 추출기로 라우팅
 
-지원 포맷:
-    .pdf  .docx  → extractor_pdf_docx.py  (Docling + pypdfium2 + EasyOCR)
-    .doc         → extractor_doc.py        (LlamaParse)
-    .hwp  .hwpx  → extractor_hwp.py        (rhwp-python + EasyOCR)
-
 사용 예시:
-    from extractor import process_document
+    process_document("path/to/file.hwp")
+    process_document(tmp_path) : fastApi로 받아온 파일
 
-    md = process_document("가이드라인.pdf")
-    md = process_document("법령.docx")
-    md = process_document("문서.doc")
-    md = process_document("의안.hwp")
-    md = process_document("의안.hwpx")
+명령어 :
+    backend 디렉토리에서
+    # PDF
+    python -m app.ocr.extractor "C:/Users/2class_8/Downloads/문서.pdf"
+
+    # PDF 특정 페이지만
+    python -m app.ocr.extractor "C:/Users/2class_8/Downloads/문서.pdf" 1,2,3
+
+    # HWP
+    python -m app.ocr.extractor "C:/Users/2class_8/Downloads/문서.hwp"
+
+지원 포맷:
+    .pdf  .docx               → extractor_pdf_docx.py  (Docling + pypdfium2 + PaddleOCR)
+    .doc                      → extractor_doc.py        (LlamaParse)
+    .hwp  .hwpx               → extractor_hwp.py        (rhwp-python + PaddleOCR)
+    .png  .jpg  .jpeg  .webp  → paddleocr_test.py       (PPStructureV3)
 """
 
 import sys
@@ -43,26 +50,38 @@ def process_document(file_path: str, pages: list = None) -> str:
 
     # ── PDF / DOCX ────────────────────────────────────────────────────────────
     if ext in (".pdf", ".docx"):
-        from app.OCR.extractor_pdf_docx import extract
+        from app.ocr.extractor_pdf_docx import extract
 
         if ext == ".pdf":
-            print("  엔진: Docling + pypdfium2 + EasyOCR")
+            print("  엔진: Docling + pypdfium2 + paddleocr")
         else:
             print("  엔진: Docling")
-        return extract(file_path, pages=pages)
+        result = extract(file_path, pages=pages)
+        print(result)
+        return result
+        # return extract(file_path, pages=pages)
 
     # ── DOC ───────────────────────────────────────────────────────────────────
     elif ext == ".doc":
-        from app.OCR.extractor_doc import extract
+        from app.ocr.extractor_doc import extract
 
         print("  엔진: LlamaParse")
-        return extract(file_path)
+        result = extract(file_path)
+        print(result)
+        return result
 
     # ── HWP / HWPX ───────────────────────────────────────────────────────────
     elif ext in (".hwp", ".hwpx"):
-        from app.OCR.extractor_hwp import extract
+        from app.ocr.extractor_hwp import extract
 
-        print("  엔진: rhwp-python + EasyOCR")
+        print("  엔진: rhwp-python + paddleocr")
+        return extract(file_path)
+
+    # ── 이미지 ────────────────────────────────────────────────────────────────
+    elif ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"):
+        from app.ocr.paddleocr_engine import extract
+
+        print("  엔진: PPStructureV3 (PaddleOCR)")
         return extract(file_path)
 
     # ── 미지원 포맷 ───────────────────────────────────────────────────────────
@@ -74,7 +93,7 @@ def process_document(file_path: str, pages: list = None) -> str:
 
 # ── CLI 실행 ──────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    path = sys.argv[1] if len(sys.argv) > 1 else "test2.pdf"
+    path = sys.argv[1] if len(sys.argv) > 1 else str(Path(__file__).parent / "test2.pdf")
     pages = None
     if len(sys.argv) > 2:
         pages = [int(p) for p in sys.argv[2].split(",")]
@@ -83,8 +102,8 @@ if __name__ == "__main__":
 
     if markdown:
         print(f"\n--- 추출 결과 미리보기 ({len(markdown):,} chars) ---")
-        print(markdown[:500])
-        print("..." if len(markdown) > 500 else "")
+        print(markdown)
+        # print("..." if len(markdown) > 500 else "")
 
         out = Path(path).with_suffix(".md").name
         Path(out).write_text(markdown, encoding="utf-8")
