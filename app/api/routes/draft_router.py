@@ -72,10 +72,11 @@ def list_drafts(
 def list_approvals(
     skip: int = Query(0, ge=0),
     limit: int = Query(3, ge=1, le=100),
+    status: str | None = Query(None),
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    total, items = draft_service.get_approval_list(db, approver_id=current_user.user_id, skip=skip, limit=limit)
+    total, items = draft_service.get_approval_list(db, approver_id=current_user.user_id, skip=skip, limit=limit, status=status)
     page = (skip // limit) + 1 if limit > 0 else 1
     return {"items": items, "total_count": total, "page": page, "limit": limit}
 
