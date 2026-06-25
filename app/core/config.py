@@ -14,8 +14,6 @@ class Settings(BaseSettings):
 
     # 기본값 있는 설정 (.env에 있으면 덮어씀)
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     POPPLER_PATH: str = "/usr/bin"
     elasticsearch_url: str = "http://localhost:9200"
     elasticsearch_index: str = "documents"

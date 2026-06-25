@@ -100,22 +100,7 @@ def soft_delete_doc(
 
     doc.is_deleted = True
 
-    # 원문 DB(Postgres)와 벡터 DB(Chroma)를 일치시키기 위해 해당 문서의 청크도 삭제.
-    # Chroma 삭제가 실패하면 커밋하지 않고 예외를 전파 → 두 저장소가 어긋나지 않음.
-    from app.llm.ingest import delete_document_by_id
-
-    delete_document_by_id(doc_id)
-
     db.commit()
-
-    # 삭제된 문서가 캐시된 RAG 답변에 남지 않도록 사용자 캐시 무효화
-    try:
-        from app.llm.pipeline import invalidate_cache
-
-        invalidate_cache(user_id)
-    except Exception:
-        pass
-
     return True
 
 

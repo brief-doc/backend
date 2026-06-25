@@ -10,13 +10,14 @@ from langchain_core.output_parsers import StrOutputParser
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
 from app.db.database import get_db
 from app.llm.llm import get_llm
 from app.llm.pipeline import _format_docs, run_query
 from app.llm.prompts import RAG_PROMPT
 from app.llm.retriever import get_retriever
 from app.services import rag_service
+
+from .auth import get_current_user
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 

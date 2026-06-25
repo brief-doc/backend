@@ -9,7 +9,7 @@ from app.db.database import get_db
 from app.db.models import Draft, RagQuery
 from app.services.auth_service import get_user
 
-from .auth import _role_names, validate_access_and_session
+from .auth import _role_names, get_current_user
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -46,7 +46,7 @@ def get_user_activity(
     user_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=401, detail="인증되지 않은 사용자입니다.")
 
