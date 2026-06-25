@@ -27,6 +27,34 @@ def _build_metadata(doc_id: int, user_id: int, doc_name: str, category: str, chu
     }
 
 
+def _delete_existing_chunks(doc_name: str, user_id: int) -> int:
+    """같은 사용자의 동일 doc_name 청크를 모두 삭제합니다.
+
+    재업로드 시 서비스가 새 doc_id를 발급하더라도, 이전에 저장된 같은 파일명의
+    청크를 먼저 지워 중복 누적을 막습니다(덮어쓰기 = 재업로드 갱신).
+
+    user_id는 현재 str로 저장되지만, 과거 int로 저장된 레거시 청크도 함께 정리합니다.
+
+    Returns:
+        삭제된 청크 수
+    """
+    deleted = 0
+    try:
+        col = get_vectorstore()._collection
+        for uid in (str(user_id), user_id):
+            existing = col.get(where={"$and": [{"user_id": uid}, {"doc_name": doc_name}]})
+            ids = existing.get("ids", [])
+            if ids:
+                col.delete(ids=ids)
+                deleted += len(ids)
+        if deleted:
+            print(f"[ingest] 기존 청크 삭제: doc_name={doc_name!r}, user_id={user_id}, {deleted}개")
+    except Exception as e:
+        # 삭제 실패해도 저장은 계속 진행 (최초 업로드면 삭제 대상이 없는 게 정상)
+        print(f"[ingest] 기존 청크 삭제 실패(계속 진행): {e}")
+    return deleted
+
+
 # ── PDF 로더 ──────────────────────────────────────────────────────────────────
 def _load_pdf(path: str) -> list[Document]:
     """PDF 파일을 페이지별 Document 리스트로 변환합니다. pdfplumber 우선, 실패 시 pypdf."""
@@ -86,6 +114,7 @@ def ingest_pdf(
 
     try:
         vs = get_vectorstore()
+        _delete_existing_chunks(doc_name, user_id)  # 재업로드 시 기존 청크 덮어쓰기
         vs.add_documents(chunks)
         print(f"[ingest_pdf] 저장 완료: {doc_name}, {len(chunks)}청크, user_id={user_id}")
     except Exception as e:
@@ -120,12 +149,19 @@ def ingest_markdown(
         return {"status": "error", "detail": "청킹 결과 없음"}
 
     for i, chunk in enumerate(chunks):
-        section = chunk.metadata.get("section") or chunk.metadata.get("h1") or chunk.metadata.get("h2") or chunk.metadata.get("h3") or "본문"
+        section = (
+            chunk.metadata.get("section")
+            or chunk.metadata.get("h1")
+            or chunk.metadata.get("h2")
+            or chunk.metadata.get("h3")
+            or "본문"
+        )
         chunk.metadata = _build_metadata(doc_id, user_id, doc_name, category, i)
         chunk.metadata["section"] = section
 
     try:
         vs = get_vectorstore()
+        _delete_existing_chunks(doc_name, user_id)  # 재업로드 시 기존 청크 덮어쓰기
         vs.add_documents(chunks)
         count = vs._collection.count()
         print(f"[ingest_md] 저장 완료: {doc_name}, {len(chunks)}청크, user_id={user_id}, DB총={count}")
