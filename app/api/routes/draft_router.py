@@ -34,7 +34,7 @@ def create_draft(
                 db=db,
                 user_id=draft.approver_id,
                 message=f"'{draft.title}' 기안이 상신되었습니다.",
-                domain_type="APPROVAL",
+                domain_type="APPROVAL_REQ",
                 resource_id=draft.draft_id,
             )
         except Exception:
@@ -167,7 +167,7 @@ def update_draft(
                 db=db,
                 user_id=draft.approver_id,
                 message=f"'{draft.title}' 기안이 상신되었습니다.",
-                domain_type="APPROVAL",
+                domain_type="APPROVAL_REQ",
                 resource_id=draft.draft_id,
             )
         except Exception:
