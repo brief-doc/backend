@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Document, Draft, User
 from app.schemas.draft import DraftCreate, DraftUpdate
+from app.services import history_service
 
 KST = timezone(timedelta(hours=9))
 
@@ -27,6 +28,8 @@ def create_draft(db: Session, author_id: int, payload: DraftCreate) -> Draft:
         updated_at=_now(),
     )
     db.add(draft)
+    action_text = "상신" if status == "pending" else "임시저장"
+    history_service.record(db, author_id, "draft", f"기안 '{payload.title}' {action_text}")
     db.commit()
     db.refresh(draft)
     return draft
@@ -89,16 +92,30 @@ def update_draft(db: Session, draft_id: int, author_id: int, payload: DraftUpdat
     data = payload.model_dump(exclude_unset=True)
     action = data.pop("action", None)
 
+    original_title = draft.title
+    change_parts = []
     for key, value in data.items():
+        if key == "title":
+            old_val = getattr(draft, key)
+            if old_val != value:
+                change_parts.append(f"제목 '{old_val}' → '{value}'")
+        elif key == "content":
+            change_parts.append("본문 수정")
+        elif key == "source_doc_id":
+            change_parts.append("첨부 문서 변경")
         setattr(draft, key, value)
+
+    detail = f" ({', '.join(change_parts)})" if change_parts else ""
 
     # 반려 후 재상신이면 pending으로 전환하고 반려 정보 초기화
     if action == "submit":
         draft.status = "pending"
         draft.reject_reason = None
         draft.decided_at = None
+        history_service.record(db, author_id, "draft", f"기안 '{original_title}' 재상신{detail}")
     elif action == "save":
         draft.status = "draft"
+        history_service.record(db, author_id, "draft", f"기안 '{original_title}' 수정 저장{detail}")
 
     draft.updated_at = _now()
     db.commit()
@@ -111,13 +128,14 @@ def get_approval_list(
     approver_id: int,
     skip: int = 0,
     limit: int = 3,
+    status: str | None = "pending",
 ) -> tuple[int, list[dict]]:
-    query = (
-        db.query(Draft, User)
-        .join(User, Draft.author_id == User.user_id)
-        .filter(Draft.approver_id == approver_id, Draft.status == "pending")
-        .order_by(Draft.created_at.desc())
-    )
+    query = db.query(Draft, User).join(User, Draft.author_id == User.user_id).filter(Draft.approver_id == approver_id)
+    if status:
+        query = query.filter(Draft.status == status)
+    else:
+        query = query.filter(Draft.status.in_(["approved", "rejected"]))
+    query = query.order_by(Draft.created_at.desc())
     total = query.count()
     rows = query.offset(skip).limit(limit).all()
     items = [
@@ -186,8 +204,11 @@ def process_decision(
     draft.status = action
     if action == "rejected":
         draft.reject_reason = reject_reason
+        reason_suffix = f" (사유: {reject_reason})" if reject_reason else ""
+        history_service.record(db, approver_id, "draft", f"기안 '{draft.title}' 반려{reason_suffix}")
     else:
         draft.reject_reason = None
+        history_service.record(db, approver_id, "draft", f"기안 '{draft.title}' 승인")
     draft.decided_at = _now()
     draft.updated_at = _now()
     db.commit()
@@ -205,6 +226,7 @@ def cancel_draft(db: Session, draft_id: int, author_id: int) -> Draft | None:
         raise ValueError(f"'{draft.status}' 상태의 기안은 취소할 수 없습니다.")
 
     draft.status = "canceled"
+    history_service.record(db, author_id, "draft", f"기안 '{draft.title}' 취소")
     draft.updated_at = _now()
     db.commit()
     db.refresh(draft)

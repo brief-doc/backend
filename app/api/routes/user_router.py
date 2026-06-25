@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.db.models import Draft, RagQuery
+from app.db.models import Draft, History, RagQuery
 from app.services.auth_service import get_user
 
 from .auth import _role_names, get_current_user
@@ -24,6 +24,7 @@ class ActivityUserDetail(BaseModel):
 class RagQueryItem(BaseModel):
     query_id: int
     query_text: str
+    answer_text: Optional[str] = None
     created_at: datetime
 
 
@@ -34,10 +35,18 @@ class DraftItem(BaseModel):
     created_at: datetime
 
 
+class HistoryItem(BaseModel):
+    history_id: int
+    change_table: str
+    change_text: str
+    change_time: datetime
+
+
 class UserActivityResponse(BaseModel):
     user: ActivityUserDetail
     rag_queries: List[RagQueryItem] = []
     drafts: List[DraftItem] = []
+    histories: List[HistoryItem] = []
 
 
 @router.get("/activity", response_model=UserActivityResponse)
@@ -65,6 +74,7 @@ def get_user_activity(
 
     rag_queries = db.query(RagQuery).filter(RagQuery.user_id == target_user_id).order_by(RagQuery.created_at.desc()).limit(10).all()
     drafts = db.query(Draft).filter(Draft.author_id == target_user_id).order_by(Draft.created_at.desc()).limit(10).all()
+    histories = db.query(History).filter(History.user_id == target_user_id).order_by(History.change_time.desc()).limit(50).all()
 
     return {
         "user": {
@@ -73,6 +83,17 @@ def get_user_activity(
             "roles": user_roles,
             "joinDate": join_date,
         },
-        "rag_queries": [{"query_id": q.query_id, "query_text": q.query_text, "created_at": q.created_at} for q in rag_queries],
+        "rag_queries": [
+            {"query_id": q.query_id, "query_text": q.query_text, "answer_text": q.answer_text, "created_at": q.created_at} for q in rag_queries
+        ],
         "drafts": [{"draft_id": d.draft_id, "title": d.title, "status": d.status, "created_at": d.created_at} for d in drafts],
+        "histories": [
+            {
+                "history_id": h.history_id,
+                "change_table": h.change_table,
+                "change_text": h.change_text,
+                "change_time": h.change_time,
+            }
+            for h in histories
+        ],
     }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import os.path
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.services import document_pipeline_service as svc
+from app.services import history_service
 
 from .auth import get_current_user
 
@@ -71,6 +73,9 @@ async def upload_document(
         file_path=file_path,
     )
 
+    history_service.record(db, current_user.user_id, "doc", f"문서 '{file.filename}' 업로드")
+    db.commit()
+
     # 백그라운드 실행: 화면 이탈 후에도 서버에서 계속 진행
     asyncio.create_task(svc.run_pipeline(job.job_id, current_user.user_id))
 
@@ -116,4 +121,10 @@ def cancel_job(
     job = svc.cancel_job(db, job_id=job_id, user_id=current_user.user_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job을 찾을 수 없습니다.")
+    # 파일명 추출: file_path 형식 = pdf_files/pipe_{32hex}_{original_name}
+    base = os.path.basename(job.file_path or "")
+    parts = base.split("_", 2)
+    display_name = parts[2] if len(parts) >= 3 else base
+    history_service.record(db, current_user.user_id, "doc", f"문서 '{display_name}' 파이프라인 취소")
+    db.commit()
     return job

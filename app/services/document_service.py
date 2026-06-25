@@ -1,3 +1,4 @@
+import difflib
 from datetime import datetime, timezone
 
 from sqlalchemy import desc
@@ -5,6 +6,30 @@ from sqlalchemy.orm import Session
 
 from app.db.models import Document, Job
 from app.schemas.document import DocResponse, DocUpdate
+from app.services import history_service
+
+_MAX_DIFF_ITEMS = 5
+
+
+def _summarize_diff(old: str, new: str) -> str:
+    old_words = (old or "").split()
+    new_words = (new or "").split()
+    matcher = difflib.SequenceMatcher(None, old_words, new_words)
+    changes = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "replace":
+            changes.append(f"'{' '.join(old_words[i1:i2])}' → '{' '.join(new_words[j1:j2])}'")
+        elif tag == "delete":
+            changes.append(f"'{' '.join(old_words[i1:i2])}' 삭제")
+        elif tag == "insert":
+            changes.append(f"'{' '.join(new_words[j1:j2])}' 추가")
+    if not changes:
+        return "요약 수정 (변경 없음)"
+    if len(changes) > _MAX_DIFF_ITEMS * 3:
+        return f"요약 전체 수정 ({len(old_words)}단어 → {len(new_words)}단어)"
+    shown = changes[:_MAX_DIFF_ITEMS]
+    suffix = f" 외 {len(changes) - _MAX_DIFF_ITEMS}건" if len(changes) > _MAX_DIFF_ITEMS else ""
+    return f"요약 수정: {', '.join(shown)}{suffix}"
 
 
 # 문서 목록 조회(최신 작업 상태와 함께)
@@ -99,7 +124,7 @@ def soft_delete_doc(
         return False
 
     doc.is_deleted = True
-
+    history_service.record(db, user_id, "doc", f"문서 '{doc.file_name}' 삭제")
     db.commit()
     return True
 
@@ -110,8 +135,20 @@ def update_doc(db: Session, doc_id: int, user_id: int, payload: DocUpdate):
         return None
 
     data = payload.model_dump(exclude_unset=True)
+    original_name = doc.file_name
+    change_parts = []
     for key, value in data.items():
+        old_val = getattr(doc, key, None)
+        if key == "content_sum":
+            change_parts.append(_summarize_diff(old_val or "", value or ""))
+        else:
+            label = {"file_name": "파일명", "category": "카테고리"}.get(key, key)
+            if old_val != value:
+                change_parts.append(f"{label} '{old_val}' → '{value}'")
         setattr(doc, key, value)
+
+    if change_parts:
+        history_service.record(db, user_id, "doc", f"문서 '{original_name}': {', '.join(change_parts)}")
 
     doc.updated_at = datetime.now(timezone.utc)
     db.commit()
