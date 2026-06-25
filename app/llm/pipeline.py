@@ -174,16 +174,27 @@ def run_query(
         except Exception:
             detected_category = ""
 
-    # 4. references 구성
-    references = [
-        {
-            "doc_name": doc.metadata.get("doc_name") or doc.metadata.get("file_name", "?"),
-            "category": doc.metadata.get("category", ""),
-            "page": doc.metadata.get("page_num", ""),
-            "snippet": doc.page_content[:200] + "...",
-        }
-        for doc in docs
-    ]
+    # 4. references 구성 — 문서 단위로 중복 제거
+    #    한 문서가 여러 청크로 쪼개져 검색되어도 출처는 문서당 1개만 노출.
+    #    docs는 랭킹 순이므로 먼저 등장한(가장 관련도 높은) 청크를 대표로 사용.
+    references = []
+    seen_docs: set[str] = set()
+    for doc in docs:
+        meta = doc.metadata
+        doc_name = meta.get("doc_name") or meta.get("file_name", "?")
+        dedup_key = meta.get("doc_id") or doc_name
+        if dedup_key in seen_docs:
+            continue
+        seen_docs.add(dedup_key)
+        references.append(
+            {
+                "doc_id": meta.get("doc_id"),
+                "doc_name": doc_name,
+                "category": meta.get("category", ""),
+                "page": meta.get("page_num", ""),
+                "snippet": doc.page_content[:200] + "...",
+            }
+        )
 
     result = {"status": "success", "answer": answer_text, "category": detected_category, "references": references}
 

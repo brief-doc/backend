@@ -32,3 +32,7 @@ Thumbs.db
 node_modules/
 package-lock.json
 package.json
+
+# vector DB artifacts
+app/llm/5617a9f61b028005a4858fdac845db406aefb181/
+chroma_pdf_db/

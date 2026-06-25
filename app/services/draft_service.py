@@ -74,6 +74,31 @@ def get_draft_detail(db: Session, draft_id: int, author_id: int) -> Draft | None
     return db.query(Draft).filter(Draft.draft_id == draft_id, Draft.author_id == author_id).first()
 
 
+def build_draft_detail_payload(db: Session, draft: Draft) -> dict:
+    source_doc_name = None
+    source_doc_summary = None
+    if draft.source_doc_id:
+        doc = db.query(Document).filter(Document.doc_id == draft.source_doc_id).first()
+        if doc:
+            source_doc_name = doc.file_name
+            source_doc_summary = doc.content_sum
+    return {
+        "draft_id": draft.draft_id,
+        "author_id": draft.author_id,
+        "source_doc_id": draft.source_doc_id,
+        "source_doc_name": source_doc_name,
+        "source_doc_summary": source_doc_summary,
+        "title": draft.title,
+        "content": draft.content,
+        "status": draft.status,
+        "approver_id": draft.approver_id,
+        "reject_reason": draft.reject_reason,
+        "decided_at": draft.decided_at,
+        "created_at": draft.created_at,
+        "updated_at": draft.updated_at,
+    }
+
+
 def update_draft(db: Session, draft_id: int, author_id: int, payload: DraftUpdate) -> Draft | None:
     draft = get_draft_detail(db, draft_id, author_id)
     if not draft:
