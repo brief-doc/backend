@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.db.models import Document, RagQuery, User
 
-from .auth import _role_names, validate_access_and_session
+from .auth import _role_names, get_current_user
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -30,7 +30,7 @@ class AdminStatsResponse(BaseModel):
 
 @router.get("/stats", response_model=AdminStatsResponse)
 def get_admin_stats(request: Request, db: Session = Depends(get_db)):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user or "관리자" not in _role_names(current_user):
         raise HTTPException(status_code=403, detail="관리자 권한이 필요합니다.")
 

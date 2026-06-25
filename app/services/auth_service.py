@@ -27,22 +27,49 @@ def get_users(db: Session, skip: int = 0, limit: int = 100):
 
 
 def get_user_session_by_token(db: Session, session_token: str):
-    return db.query(UserSession).filter(UserSession.session_token == session_token).first()
+    session = db.query(UserSession).filter(UserSession.session_token == session_token).first()
+
+    if not session:
+        return None
+
+    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
+        if session.is_active:
+            session.is_active = False
+            db.commit()
+            db.refresh(session)
+        return None
+
+    if not session.is_active:
+        return None
+
+    return session
 
 
 def get_session_by_id(db: Session, session_id: int):
     return db.query(UserSession).filter(UserSession.session_id == session_id).first()
 
 
+def get_session_by_user(db: Session, user_id: int):
+    session = db.query(UserSession).filter(UserSession.user_id == user_id and UserSession.is_active).first()
+    if not session:
+        return None
+
+    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
+        if session.is_active:
+            session.is_active = False
+            db.commit()
+            db.refresh(session)
+        return None
+
+    if not session.is_active:
+        return None
+
+    return session
+
+
 def get_user_by_session_token(db: Session, session_token: str):
     session = get_user_session_by_token(db, session_token)
-    if session is None:
-        return None
-    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
-        session.is_active = False
-        db.commit()
-        return None
-    if not session.is_active:
+    if not session:
         return None
     return get_user(db, session.user_id)
 
@@ -75,12 +102,27 @@ def create_user_session(
 
 
 def deactivate_session(db: Session, session: UserSession):
-    session.is_active = False
-    db.commit()
-    return session
+    try:
+        session.expires_at = datetime.now(timezone.utc)
+        session.is_active = False
+
+        db.add(session)
+        db.commit()
+        db.refresh(session)
+        return session
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to deactivate session")
 
 
-DEFAULT_ROLE_NAME = "실무 담당자"
+def get_user_from_session_token(db: Session, session_token: str):
+    session = get_user_session_by_token(db, session_token)
+    if not session or not session.is_active:
+        return None
+    if session.expires_at < datetime.now(timezone.utc):
+        deactivate_session(db, session.session_id)
+        return None
+    return session.user
 
 
 def create_user(db: Session, user: UserCreate):
@@ -94,7 +136,7 @@ def create_user(db: Session, user: UserCreate):
     db.flush()  # commit 전에 db_user.user_id를 확보 (FK에 필요)
 
     if not user.roles:
-        role_names = [DEFAULT_ROLE_NAME]
+        role_names = ["DEFAULT_ROLE_NAME"]
     else:
         role_names = user.roles
 

@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
 from app.db.database import get_db
 from app.schemas.draft import (
     ApprovalDetail,
@@ -13,6 +12,8 @@ from app.schemas.draft import (
     PaginatedDraftResponse,
 )
 from app.services import draft_service, notification_service
+
+from .auth import get_current_user
 
 router = APIRouter(prefix="/drafts", tags=["drafts"])
 
@@ -142,7 +143,7 @@ def get_draft(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="기안을 찾을 수 없습니다.")
     if existing.author_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="접근 권한이 없습니다.")
-    return draft_service.build_draft_detail_payload(db, existing)
+    return existing
 
 
 @router.patch("/{draft_id}", response_model=DraftDetail)

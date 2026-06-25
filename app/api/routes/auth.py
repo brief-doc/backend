@@ -6,21 +6,18 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.security import (
-    create_access_token,
-    create_refresh_token,
     verify_password,
-    verify_token,
 )
 from app.db.database import get_db
-from app.schemas.user import RefreshTokenRequest, Token, UserCreate
+from app.schemas.user import UserCreate
 from app.services.auth_service import (
     change_password,
     create_user,
     create_user_session,
     deactivate_session,
     get_session_by_id,
+    get_session_by_user,
     get_user_by_email,
     get_user_by_session_token,
     get_user_session_by_token,
@@ -75,28 +72,46 @@ class SessionResponse(BaseModel):
         from_attributes = True
 
 
-def validate_access_and_session(request: Request, db: Session):
-    access_token = request.cookies.get("access_token")
+def get_current_user(request: Request, db: Session = Depends(get_db)):
     session_token = request.cookies.get("session_token")
-    if not access_token or not session_token:
-        return None
 
-    try:
-        payload = verify_token(access_token, token_type="access")
-    except HTTPException:
-        return None
+    if not session_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="인증 세션이 없습니다.",
+        )
 
-    user = get_user_by_session_token(db, session_token)
-    if not user or str(user.user_id) != str(payload.get("sub")):
-        return None
+    session = get_user_session_by_token(db, session_token)
 
-    return user
+    if not session or not session.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="유효하지 않은 세션입니다.")
+
+    if session.expires_at < datetime.now(timezone.utc):
+        deactivate_session(db, session.session_id)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="세션이 만료되었습니다.")
+
+    return session.user
+
+
+def get_current_active_user(current_user=Depends(get_current_user)):
+    if not current_user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="비활성화된 계정입니다")
+    return current_user
+
+
+def get_current_admin(current_user=Depends(get_current_user)):
+    # Assuming user.user_roles is a relationship list
+    role_names = [ur.role.role_name for ur in current_user.user_roles]
+
+    if "관리자" not in role_names:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="관리자 권한이 필요합니다.")
+    return current_user
 
 
 @router.get("/me")
 def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
     print("get_me 호출됨")
-    user = validate_access_and_session(request, db)
+    user = get_current_user(request, db)
     if user:
         return {
             "authenticated": True,
@@ -108,55 +123,25 @@ def get_me(request: Request, response: Response, db: Session = Depends(get_db)):
         }
 
     session_token = request.cookies.get("session_token")
-    refresh_token_cookie = request.cookies.get("refresh_token")
-    if not session_token or not refresh_token_cookie:
+    if not session_token:
         return {"authenticated": False}
 
     user = get_user_by_session_token(db, session_token)
     if not user:
-        response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
-        return {"authenticated": False}
-
-    try:
-        payload = verify_token(refresh_token_cookie, token_type="refresh")
-        if str(payload.get("sub")) != str(user.user_id):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="토큰 정보가 일치하지 않습니다",
-            )
-
-        new_access_token = create_access_token(data={"sub": str(user.user_id)})
         response.set_cookie(
-            key="access_token",
-            value=new_access_token,
+            key="session_token",
+            value=session_token,
+            path="/",
             httponly=True,
-            secure=True,
-            samesite="none",
-            max_age=60 * 30,
+            secure=False,
+            samesite="lax",
+            max_age=1,
         )
-        return {
-            "authenticated": True,
-            "id": user.user_id,
-            "email": user.user_email,
-            "name": user.user_name,
-            "roles": _role_names(user),
-            "created_at": user.created_at,
-        }
-    except HTTPException:
-        response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
-        return {"authenticated": False}
+    return {"authenticated": False}
 
 
 @router.post("/register", response_model=UserResponse)
-def register(user: UserCreate, request: Request, db: Session = Depends(get_db)):
-    current = validate_access_and_session(request, db)
-    if not current or "관리자" not in _role_names(current):
-        raise HTTPException(status_code=403, detail="계정 생성 권한이 없습니다.")
-
+def register(user: UserCreate, admin=Depends(get_current_admin), db: Session = Depends(get_db)):
     if get_user_by_email(db, user.email, is_new=True):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이미 존재하는 이메일입니다")
     new_user = create_user(db, user)
@@ -195,44 +180,36 @@ def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="이메일 또는 비밀번호가 올바르지 않습니다",
         )
+    new_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=24)
 
-    session_token = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    create_user_session(
-        db,
-        user.user_id,
-        session_token,
-        expires_at,
-        request.client.host if request.client else None,
-        request.headers.get("user-agent"),
-    )
+    session = get_session_by_user(db, user.user_id)
 
-    access_token = create_access_token(data={"sub": str(user.user_id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
+    if session:
+        # Update existing row with a fresh, secure random token
+        session.session_token = new_token
+        session.expires_at = expires_at
+        session.is_active = True
+        db.commit()
 
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=60 * 30,
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
-    )
+    else:
+        create_user_session(
+            db,
+            user.user_id,
+            new_token,
+            expires_at,
+            request.client.host if request.client else None,
+            request.headers.get("user-agent"),
+        )
+
     response.set_cookie(
         key="session_token",
-        value=session_token,
+        value=new_token,
+        path="/",
         httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
+        secure=False,
+        samesite="lax",
+        max_age=60 * 60 * 24,
     )
 
     return {
@@ -247,7 +224,7 @@ def login(
 
 @router.get("/approvers")
 def list_approvers(request: Request, db: Session = Depends(get_db)):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -261,7 +238,7 @@ def list_approvers(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/users", response_model=List[UserListResponse])
 def list_users(request: Request, db: Session = Depends(get_db)):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -294,7 +271,7 @@ def toggle_user_activation(user_id: int, payload: ActivationRequest, request: Re
     Endpoint to activate/deactivate users. Restricted to Admin role only.
     """
     # 1. Verify admin is logged in
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -316,7 +293,7 @@ def toggle_user_activation(user_id: int, payload: ActivationRequest, request: Re
 
 @router.post("/users/{user_id}/reset-password")
 def reset_password(user_id: int, request: Request, db: Session = Depends(get_db)):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -329,7 +306,7 @@ def reset_password(user_id: int, request: Request, db: Session = Depends(get_db)
 
 @router.post("/users/{user_id}/force-logout")
 def force_logout_user(user_id: int, request: Request, response: Response, db: Session = Depends(get_db)):
-    current_user = validate_access_and_session(request, db)
+    current_user = get_current_user(request, db)
     if not current_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -340,57 +317,9 @@ def force_logout_user(user_id: int, request: Request, response: Response, db: Se
     return {"message": "사용자가 로그아웃되었습니다", "logged_out_sessions": len(sessions)}
 
 
-@router.post("/refresh", response_model=Token)
-def refresh_token(
-    request: Request,
-    response: Response,
-    refresh_data: RefreshTokenRequest,
-    db: Session = Depends(get_db),
-):
-    session_token = request.cookies.get("session_token")
-    if not session_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="세션이 없습니다")
-
-    user = get_user_by_session_token(db, session_token)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="세션이 만료되었거나 비활성화되었습니다",
-        )
-
-    payload = verify_token(refresh_data.refresh_token, token_type="refresh")
-    if str(payload.get("sub")) != str(user.user_id):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="토큰 정보가 일치하지 않습니다",
-        )
-
-    access_token = create_access_token(data={"sub": str(user.user_id)})
-    refresh_token = create_refresh_token(data={"sub": str(user.user_id)})
-
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=60 * settings.ACCESS_TOKEN_EXPIRE_MINUTES,
-    )
-    response.set_cookie(
-        key="refresh_token",
-        value=refresh_token,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        max_age=60 * 60 * 24 * settings.REFRESH_TOKEN_EXPIRE_DAYS,
-    )
-
-    return Token(access_token=access_token, refresh_token=refresh_token)
-
-
 @router.get("/sessions", response_model=List[SessionResponse])
 def get_sessions(request: Request, db: Session = Depends(get_db)):
-    user = validate_access_and_session(request, db)
+    user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
     return get_user_sessions(db, user.user_id)
@@ -398,7 +327,7 @@ def get_sessions(request: Request, db: Session = Depends(get_db)):
 
 @router.delete("/sessions/{session_id}")
 def revoke_session(session_id: int, request: Request, response: Response, db: Session = Depends(get_db)):
-    user = validate_access_and_session(request, db)
+    user = get_current_user(request, db)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="인증이 필요합니다")
 
@@ -408,9 +337,16 @@ def revoke_session(session_id: int, request: Request, response: Response, db: Se
 
     deactivate_session(db, session)
     if request.cookies.get("session_token") == session.session_token:
-        response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
-        response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
+        response.set_cookie(
+            key="session_token",
+            value="",
+            path="/",
+            expires="Thu, 01 Jan 1970 00:00:00 GMT",
+            max_age=0,
+            httponly=True,
+            secure=False,  # Match this to your current environment
+            samesite="lax",
+        )
 
     return {"message": "세션이 종료되었습니다"}
 
@@ -462,8 +398,8 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         session = get_user_session_by_token(db, session_token)
         if session:
             deactivate_session(db, session)
-
-    response.delete_cookie(key="access_token", httponly=True, secure=True, samesite="none")
-    response.delete_cookie(key="refresh_token", httponly=True, secure=True, samesite="none")
-    response.delete_cookie(key="session_token", httponly=True, secure=True, samesite="none")
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    response.delete_cookie(key="session_token", path="/", domain="localhost", httponly=True, samesite="lax")
     return {"message": "로그아웃 성공"}
