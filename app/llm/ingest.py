@@ -55,6 +55,29 @@ def _delete_existing_chunks(doc_name: str, user_id: int) -> int:
     return deleted
 
 
+def delete_document_by_id(doc_id: int | str) -> int:
+    """특정 문서(doc_id)의 모든 청크를 ChromaDB에서 삭제합니다.
+
+    doc_id는 ingest 시 메타데이터에 str로 저장되므로 str로 변환해 매칭합니다.
+    문서 단위 정확 삭제용 — 파일명 중복이나 재업로드 영향을 받지 않습니다.
+
+    Args:
+        doc_id: 삭제할 문서의 ID (Postgres Document.doc_id 와 동일)
+
+    Returns:
+        삭제된 청크 수 (해당 문서가 없으면 0)
+    """
+    col = get_vectorstore()._collection
+    found = col.get(where={"doc_id": str(doc_id)})
+    ids = found.get("ids", [])
+    if ids:
+        col.delete(ids=ids)
+        print(f"[ingest] 문서 삭제: doc_id={doc_id}, {len(ids)}개 청크 제거")
+    else:
+        print(f"[ingest] 문서 삭제: doc_id={doc_id} 에 해당하는 청크 없음")
+    return len(ids)
+
+
 # ── PDF 로더 ──────────────────────────────────────────────────────────────────
 def _load_pdf(path: str) -> list[Document]:
     """PDF 파일을 페이지별 Document 리스트로 변환합니다. pdfplumber 우선, 실패 시 pypdf."""
