@@ -8,9 +8,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
 from app.db.database import get_db
 from app.services import document_pipeline_service as svc
+
+from .auth import get_current_user
 
 router = APIRouter(prefix="/documents/pipeline", tags=["document-pipeline"])
 
