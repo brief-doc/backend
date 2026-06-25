@@ -121,8 +121,6 @@ def _notify_failure(db: Session, user_id: int, job_id: int, filename: str, stage
             db=db,
             user_id=user_id,
             message=f"'{filename}' 문서 처리 실패 — {stage} 단계에서 오류가 발생했습니다.",
-            domain_type="SUMMARY",
-            resource_id=job_id,
         )
     except Exception:
         pass
