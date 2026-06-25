@@ -142,7 +142,7 @@ def get_draft(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="기안을 찾을 수 없습니다.")
     if existing.author_id != current_user.user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="접근 권한이 없습니다.")
-    return existing
+    return draft_service.build_draft_detail_payload(db, existing)
 
 
 @router.patch("/{draft_id}", response_model=DraftDetail)
