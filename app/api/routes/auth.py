@@ -11,6 +11,7 @@ from app.core.security import (
 )
 from app.db.database import get_db
 from app.schemas.user import UserCreate
+from app.services import history_service
 from app.services.auth_service import (
     change_password,
     create_user,
@@ -145,6 +146,8 @@ def register(user: UserCreate, admin=Depends(get_current_admin), db: Session = D
     if get_user_by_email(db, user.email, is_new=True):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="이미 존재하는 이메일입니다")
     new_user = create_user(db, user)
+    history_service.record(db, new_user.user_id, "user", "계정 생성")
+    db.commit()
     return {
         "id": new_user.user_id,
         "email": new_user.user_email,
@@ -288,6 +291,8 @@ def toggle_user_activation(user_id: int, payload: ActivationRequest, request: Re
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
 
     action = "비활성화" if payload.is_deleted else "활성화"
+    history_service.record(db, user_id, "user", f"관리자에 의해 계정 {action}")
+    db.commit()
     return {"message": f"사용자가 성공적으로 {action}되었습니다."}
 
 
@@ -301,6 +306,8 @@ def reset_password(user_id: int, request: Request, db: Session = Depends(get_db)
     if not updated_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="사용자를 찾을 수 없습니다")
 
+    history_service.record(db, user_id, "user", "관리자에 의해 비밀번호 초기화")
+    db.commit()
     return {"message": "암호가 초기화되었습니다"}
 
 
@@ -314,6 +321,8 @@ def force_logout_user(user_id: int, request: Request, response: Response, db: Se
     for session in sessions:
         deactivate_session(db, session)
 
+    history_service.record(db, user_id, "user", "관리자에 의해 강제 로그아웃")
+    db.commit()
     return {"message": "사용자가 로그아웃되었습니다", "logged_out_sessions": len(sessions)}
 
 
@@ -383,6 +392,8 @@ def change_password_endpoint(
     if not updated_user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="현재 비밀번호가 올바르지 않습니다")
 
+    history_service.record(db, updated_user.user_id, "user", "비밀번호 변경")
+    db.commit()
     return {
         "message": "비밀번호가 성공적으로 변경되었습니다",
         "id": updated_user.user_id,
