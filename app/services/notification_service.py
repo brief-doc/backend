@@ -42,11 +42,11 @@ def create_notification(
     db: Session,
     user_id: int,
     message: str,
-    domain_type: str,
-    resource_id: int,
+    domain_type: str | None = None,
+    resource_id: int | None = None,
 ) -> Notification:
     """DB에 알림을 저장하고 해당 사용자의 SSE 큐로 즉시 push."""
-    link = f"{domain_type}:{resource_id}"
+    link = f"{domain_type}:{resource_id}" if domain_type and resource_id is not None else None
     now = datetime.now(KST)
 
     noti = Notification(
