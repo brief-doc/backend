@@ -49,6 +49,8 @@ class DraftDetail(BaseModel):
     draft_id: int
     author_id: int
     source_doc_id: Optional[int] = None
+    source_doc_name: Optional[str] = None
+    source_doc_summary: Optional[str] = None
     title: str
     content: str
     status: str
