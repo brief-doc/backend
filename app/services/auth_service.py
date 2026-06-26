@@ -9,13 +9,6 @@ from app.schemas.user import UserCreate
 
 
 def _is_expired(expires_at: datetime) -> bool:
-    """naive/aware 모두 처리하는 만료 체크."""
-    if expires_at.tzinfo is None:
-        return expires_at < datetime.utcnow()
-    return expires_at < datetime.now(timezone.utc)
-
-
-def _is_expired(expires_at: datetime) -> bool:
     """naive/aware datetime 모두 처리 — DB 환경(SQLite/PostgreSQL)에 관계없이 비교."""
     now = datetime.now(timezone.utc)
     if expires_at.tzinfo is None:
