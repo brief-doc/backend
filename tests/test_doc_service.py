@@ -2,6 +2,7 @@
 UT-DOC-002: 문서 목록·검색
 UT-DOC-003: 문서 상세·수정·삭제
 """
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
@@ -54,9 +55,7 @@ class TestDocListSearch:
         job = self._make_job()
         mock_db = self._make_mock_db([(doc, job)])
 
-        total, result = document_service.get_docs_with_latest_job(
-            mock_db, user_id=1, category="행정법"
-        )
+        total, result = document_service.get_docs_with_latest_job(mock_db, user_id=1, category="행정법")
 
         assert total == 1
         assert result[0].category == "행정법"
@@ -67,24 +66,17 @@ class TestDocListSearch:
         job = self._make_job()
         mock_db = self._make_mock_db([(doc, job)])
 
-        total, result = document_service.get_docs_with_latest_job(
-            mock_db, user_id=1, keyword="특허"
-        )
+        total, result = document_service.get_docs_with_latest_job(mock_db, user_id=1, keyword="특허")
 
         assert total == 1
         assert "특허" in result[0].file_name
 
     def test_pagination_limit(self):
         """UT-DOC-002-3: skip=0, limit=10 → 10건 단위 조회"""
-        pairs = [
-            (self._make_doc(i, f"doc_{i}.pdf", "기타", 1), self._make_job())
-            for i in range(1, 11)
-        ]
+        pairs = [(self._make_doc(i, f"doc_{i}.pdf", "기타", 1), self._make_job()) for i in range(1, 11)]
         mock_db = self._make_mock_db(pairs)
 
-        total, result = document_service.get_docs_with_latest_job(
-            mock_db, user_id=1, skip=0, limit=10
-        )
+        total, result = document_service.get_docs_with_latest_job(mock_db, user_id=1, skip=0, limit=10)
 
         assert total == 10
         assert len(result) == 10
@@ -93,9 +85,7 @@ class TestDocListSearch:
         """UT-DOC-002-1 엣지: 매칭 없는 카테고리 → 빈 목록"""
         mock_db = self._make_mock_db([])
 
-        total, result = document_service.get_docs_with_latest_job(
-            mock_db, user_id=1, category="민사법"
-        )
+        total, result = document_service.get_docs_with_latest_job(mock_db, user_id=1, category="민사법")
 
         assert total == 0
         assert result == []

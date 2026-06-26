@@ -1,6 +1,7 @@
 """
 UT-APR-002 알림: 상태 변경 시 알림 생성, 읽음 처리·미읽음 카운트
 """
+
 from datetime import timedelta, timezone
 from unittest.mock import patch
 
@@ -52,9 +53,7 @@ class TestNotificationReadToggle:
     def test_mark_as_read_toggles_is_read(self, mock_push, db, users):
         """읽음 토글 → is_read=True"""
         staff = users["staff"]
-        noti = notification_service.create_notification(
-            db, staff.user_id, "테스트 알림"
-        )
+        noti = notification_service.create_notification(db, staff.user_id, "테스트 알림")
         assert noti.is_read is False
 
         updated = notification_service.mark_as_read(db, noti.noti_id, staff.user_id)
@@ -66,9 +65,7 @@ class TestNotificationReadToggle:
         """타 사용자 알림 읽음 처리 차단"""
         staff = users["staff"]
         admin = users["admin"]
-        noti = notification_service.create_notification(
-            db, staff.user_id, "실무자 알림"
-        )
+        noti = notification_service.create_notification(db, staff.user_id, "실무자 알림")
 
         result = notification_service.mark_as_read(db, noti.noti_id, admin.user_id)
 
@@ -81,9 +78,7 @@ class TestNotificationReadToggle:
         notification_service.create_notification(db, staff.user_id, "알림1")
         noti2 = notification_service.create_notification(db, staff.user_id, "알림2")
 
-        total_before, items_before = notification_service.get_notifications(
-            db, staff.user_id
-        )
+        total_before, items_before = notification_service.get_notifications(db, staff.user_id)
         unread_before = sum(1 for n in items_before if not n.is_read)
 
         notification_service.mark_as_read(db, noti2.noti_id, staff.user_id)
@@ -100,9 +95,7 @@ class TestNotificationReadToggle:
         for i in range(5):
             notification_service.create_notification(db, staff.user_id, f"알림{i}")
 
-        total, items = notification_service.get_notifications(
-            db, staff.user_id, skip=0, limit=3
-        )
+        total, items = notification_service.get_notifications(db, staff.user_id, skip=0, limit=3)
 
         assert total == 5
         assert len(items) == 3

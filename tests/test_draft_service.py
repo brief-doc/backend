@@ -2,6 +2,7 @@
 UT-APR-001: 기안 작성·상신
 UT-APR-002: 결재 처리
 """
+
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -186,9 +187,7 @@ class TestDraftApproval:
         draft = self._create_pending_draft(db, staff.user_id, admin.user_id)
         reason = "구체적인 근거가 부족합니다."
 
-        result = draft_service.process_decision(
-            db, draft.draft_id, admin.user_id, "rejected", reject_reason=reason
-        )
+        result = draft_service.process_decision(db, draft.draft_id, admin.user_id, "rejected", reject_reason=reason)
 
         assert result.status == "rejected"
         assert result.reject_reason == reason
@@ -206,9 +205,7 @@ class TestDraftApproval:
         admin = users["admin"]
         draft = self._create_pending_draft(db, staff.user_id, admin.user_id)
 
-        result = draft_service.process_decision(
-            db, draft.draft_id, staff.user_id, "approved"
-        )
+        result = draft_service.process_decision(db, draft.draft_id, staff.user_id, "approved")
 
         assert result is None
 

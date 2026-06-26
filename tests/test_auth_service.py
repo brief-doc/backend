@@ -3,6 +3,7 @@ UT-ADM-001: 대시보드·세션 관리
 - admin 외 계정 접근 차단 (role 확인)
 - force-logout → 세션 is_active=false
 """
+
 from datetime import datetime, timedelta, timezone
 
 from app.core.security import verify_password
@@ -52,9 +53,7 @@ class TestSessionManagement:
         auth_service.deactivate_session(db, session)
 
         db.expire(session)
-        updated = db.query(UserSession).filter(
-            UserSession.session_id == session.session_id
-        ).first()
+        updated = db.query(UserSession).filter(UserSession.session_id == session.session_id).first()
         assert updated.is_active is False
 
     def test_deactivated_user_sessions_all_inactive(self, db, users):
@@ -97,9 +96,7 @@ class TestPasswordChange:
         """올바른 현재 비밀번호 → 변경 성공"""
         staff = users["staff"]
 
-        result = auth_service.change_password(
-            db, staff.user_id, "000000", "newpass123"
-        )
+        result = auth_service.change_password(db, staff.user_id, "000000", "newpass123")
 
         assert result is not None
         assert verify_password("newpass123", result.user_password)
@@ -108,9 +105,7 @@ class TestPasswordChange:
         """틀린 현재 비밀번호 → None 반환"""
         staff = users["staff"]
 
-        result = auth_service.change_password(
-            db, staff.user_id, "wrongpassword", "newpass123"
-        )
+        result = auth_service.change_password(db, staff.user_id, "wrongpassword", "newpass123")
 
         assert result is None
 
