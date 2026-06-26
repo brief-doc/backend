@@ -152,7 +152,7 @@ CREATE TABLE IF NOT EXISTS public.draft
     title character varying COLLATE pg_catalog."default" NOT NULL,
     content text COLLATE pg_catalog."default" NOT NULL, -- 상신 내용
     source_doc_id integer,                            -- 첨부 근거 문서(요약). 없을 수 있음
-    status character varying COLLATE pg_catalog."default" NOT NULL DEFAULT 'pending',
+    status character varying COLLATE pg_catalog."default" NOT NULL DEFAULT 'draft',
 
     -- ▼ 결재 정보 (병합) — 대기(pending) 중엔 NULL
     approver_id integer,                              -- 결재한 사람
