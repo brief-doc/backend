@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from langchain_core.output_parsers import StrOutputParser
@@ -164,6 +165,38 @@ def summarize_document(doc_text: str, category: str) -> dict:
             "chunks_used": 0,
             "message": f"요약 생성 실패: {e}",
         }
+
+
+# ── 스트리밍 요약 ─────────────────────────────────────────────────────────────
+
+
+def prepare_reduce_input(doc_text: str, category: str) -> dict:
+    """Map 단계(동기·병렬)를 완료하고 Reduce 입력 텍스트와 카테고리를 반환.
+
+    run_in_executor 에서 실행 후 stream_reduce() 에 전달하면 됩니다.
+    """
+    resolved = category if category in SUMMARY_TEMPLATES else classify_document_category(doc_text)
+    chunks = _splitter.split_text(doc_text)
+
+    if len(chunks) == 1:
+        return {"text": doc_text, "category": resolved}
+
+    partial = _parallel_map(chunks)
+    combined = "\n\n".join(f"[부분 요약 {i + 1}]\n{s}" for i, s in enumerate(partial))
+
+    if len(combined) > CHUNK_SIZE:
+        second_chunks = _splitter.split_text(combined)
+        partial = _parallel_map(second_chunks)
+        combined = "\n\n".join(f"[부분 요약 {i + 1}]\n{s}" for i, s in enumerate(partial))
+
+    return {"text": combined, "category": resolved}
+
+
+async def stream_reduce(text: str, category: str) -> AsyncGenerator[str, None]:
+    """Reduce 단계를 토큰 단위로 스트리밍합니다."""
+    chain = get_reduce_prompt(category) | get_summary_llm() | StrOutputParser()
+    async for token in chain.astream({"text": text}):
+        yield token
 
 
 # ── 하위 호환 ─────────────────────────────────────────────────────────────────

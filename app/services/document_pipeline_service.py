@@ -288,7 +288,7 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
 
         _update_job(db, job, "embedding")
 
-        # ── 4. 카테고리 자동 분류 + LLM 요약 (70% → 95%) ──────
+        # ── 4. 카테고리 자동 분류 + LLM 요약 스트리밍 (70% → 95%) ──────
         if job.is_cancelled:
             _cancel_cleanup(db, job)
             return
@@ -297,24 +297,33 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
         category = _auto_classify(raw_text)
 
         try:
-            from app.llm.summarizer import summarize_document
+            from app.llm.summarizer import prepare_reduce_input, stream_reduce
 
-            summary_result: dict = await loop.run_in_executor(
+            # Map 단계: 동기·병렬 처리 (스레드풀)
+            reduce_input: dict = await loop.run_in_executor(
                 _executor,
-                lambda: summarize_document(raw_text, category),
+                lambda: prepare_reduce_input(raw_text, category),
             )
+
+            # Reduce 단계: 토큰 단위 스트리밍 → SSE push
+            tokens: list[str] = []
+            async for token in stream_reduce(reduce_input["text"], reduce_input["category"]):
+                tokens.append(token)
+                notification_service.push_event(user_id, {
+                    "type": "summary_token",
+                    "job_id": job_id,
+                    "token": token,
+                })
+
+            summary_text = "".join(tokens).strip()
+            resolved_category = reduce_input["category"]
         except Exception as e:
             _fail_job(db, job, "summarizing", f"요약 처리 중 오류: {e}")
             _notify_failure(db, user_id, job_id, filename, "요약")
             return
 
-        if summary_result.get("status") == "error" or not summary_result.get("summary", "").strip():
-            _fail_job(
-                db,
-                job,
-                "summarizing",
-                summary_result.get("message", "요약문이 생성되지 않았습니다."),
-            )
+        if not summary_text:
+            _fail_job(db, job, "summarizing", "요약문이 생성되지 않았습니다.")
             _notify_failure(db, user_id, job_id, filename, "요약")
             return
 
@@ -322,8 +331,8 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
 
         # ── 5. 최종 저장 (95% → 100%) ──────────────────────────
         try:
-            doc.content_sum = summary_result["summary"]
-            doc.category = summary_result.get("category", category)
+            doc.content_sum = summary_text
+            doc.category = resolved_category
             doc.updated_at = _now()
             job.job_status = "completed"
             job.pipeline_stage = "completed"
