@@ -102,7 +102,12 @@ def _fail_job(db: Session, job: Job, stage: str, message: str) -> None:
 
 
 def _cancel_cleanup(db: Session, job: Job) -> None:
-    """취소 처리: 상태 저장 → SSE 푸시 → 임시 파일 삭제"""
+    """취소 처리: Document 소프트 삭제(생성된 경우) → 상태 저장 → SSE 푸시 → 임시 파일 삭제"""
+    # OCR 이후 Document 레코드가 생성된 경우 소프트 삭제 + ChromaDB 정리
+    if job.doc_id:
+        from app.services.document_service import soft_delete_doc
+        soft_delete_doc(db, doc_id=job.doc_id, user_id=job.user_id)
+
     job.job_status = "cancelled"
     job.pipeline_stage = "cancelled"
     job.job_finish = _now()
