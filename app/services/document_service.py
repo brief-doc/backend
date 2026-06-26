@@ -5,6 +5,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.db.models import Document, Job
+from app.llm.ingest import delete_document_by_id
 from app.schemas.document import DocResponse, DocUpdate
 from app.services import history_service
 
@@ -126,6 +127,7 @@ def soft_delete_doc(
     doc.is_deleted = True
     history_service.record(db, user_id, "doc", f"문서 '{doc.file_name}' 삭제")
     db.commit()
+    delete_document_by_id(doc_id)
     return True
 
 
