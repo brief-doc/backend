@@ -63,7 +63,7 @@ def _auto_classify(text: str) -> str:
     return "기타"
 
 
-def _push_stage(user_id: int, job_id: int, stage: str) -> None:
+def _push_stage(user_id: int, job_id: int, stage: str, doc_id: int | None = None) -> None:
     """SSE를 통해 클라이언트에 현재 단계 전송"""
     notification_service.push_event(
         user_id,
@@ -71,6 +71,7 @@ def _push_stage(user_id: int, job_id: int, stage: str) -> None:
             "type": "pipeline_progress",
             "job_id": job_id,
             "stage": stage,
+            "doc_id": doc_id,
         },
     )
 
@@ -82,7 +83,7 @@ def _update_job(db: Session, job: Job, stage: str, **kwargs) -> None:
     for k, v in kwargs.items():
         setattr(job, k, v)
     db.commit()
-    _push_stage(job.user_id, job.job_id, stage)
+    _push_stage(job.user_id, job.job_id, stage, doc_id=job.doc_id)
 
 
 def _fail_job(db: Session, job: Job, stage: str, message: str) -> None:
@@ -97,7 +98,7 @@ def _fail_job(db: Session, job: Job, stage: str, message: str) -> None:
     job.error_message = message
     job.job_finish = _now()
     db.commit()
-    _push_stage(job.user_id, job.job_id, "failed")
+    _push_stage(job.user_id, job.job_id, "failed", doc_id=job.doc_id)
 
 
 def _cancel_cleanup(db: Session, job: Job) -> None:
@@ -106,7 +107,7 @@ def _cancel_cleanup(db: Session, job: Job) -> None:
     job.pipeline_stage = "cancelled"
     job.job_finish = _now()
     db.commit()
-    _push_stage(job.user_id, job.job_id, "cancelled")
+    _push_stage(job.user_id, job.job_id, "cancelled", doc_id=job.doc_id)
     _cleanup_file(job.file_path)
 
 
@@ -376,7 +377,7 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
             pass
 
         # 완료: SSE 단계 푸시 + 알림
-        _push_stage(user_id, job_id, "completed")
+        _push_stage(user_id, job_id, "completed", doc_id=doc.doc_id)
         try:
             notification_service.create_notification(
                 db=db,
