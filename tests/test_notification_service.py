@@ -1,12 +1,9 @@
 """
 UT-APR-002 알림: 상태 변경 시 알림 생성, 읽음 처리·미읽음 카운트
 """
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from unittest.mock import patch
 
-import pytest
-
-from app.db.models import Notification
 from app.services import notification_service
 
 KST = timezone(timedelta(hours=9))

@@ -7,9 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from app.db.models import Draft, Notification
+from app.db.models import Draft
 from app.schemas.draft import DraftCreate, DraftUpdate
-from app.services import draft_service, notification_service
+from app.services import draft_service
 
 KST = timezone(timedelta(hours=9))
 

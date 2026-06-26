@@ -5,11 +5,9 @@ UT-ADM-001: 대시보드·세션 관리
 """
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
+from app.core.security import verify_password
 from app.db.models import UserSession
 from app.services import auth_service
-from app.core.security import verify_password
 
 KST = timezone(timedelta(hours=9))
 

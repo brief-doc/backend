@@ -73,8 +73,8 @@ sys.modules["app.ocr"] = MagicMock()
 sys.modules["app.ocr.extractor"] = MagicMock()
 
 # ── 4. 앱 모듈 import (stub 등록 후) ─────────────────────────────────────────
-from app.core.security import hash_password
-from app.db.models import Base, Document, Job, Role, User, UserRole
+from app.core.security import hash_password  # noqa: E402
+from app.db.models import Base, Document, Job, Role, User, UserRole  # noqa: E402
 
 KST = timezone(timedelta(hours=9))
 

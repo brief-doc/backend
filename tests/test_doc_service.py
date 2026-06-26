@@ -5,8 +5,6 @@ UT-DOC-003: 문서 상세·수정·삭제
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.db.models import Document, History, Job
 from app.schemas.document import DocUpdate
 from app.services import document_service
