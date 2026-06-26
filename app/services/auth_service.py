@@ -8,6 +8,21 @@ from app.db.models import Role, User, UserRole, UserSession
 from app.schemas.user import UserCreate
 
 
+def _is_expired(expires_at: datetime) -> bool:
+    """naive/aware 모두 처리하는 만료 체크."""
+    if expires_at.tzinfo is None:
+        return expires_at < datetime.utcnow()
+    return expires_at < datetime.now(timezone.utc)
+
+
+def _is_expired(expires_at: datetime) -> bool:
+    """naive/aware datetime 모두 처리 — DB 환경(SQLite/PostgreSQL)에 관계없이 비교."""
+    now = datetime.now(timezone.utc)
+    if expires_at.tzinfo is None:
+        return expires_at < now.replace(tzinfo=None)
+    return expires_at < now
+
+
 def get_user(db: Session, id: int):
     return db.query(User).filter(User.user_id == id).first()
 
@@ -32,7 +47,7 @@ def get_user_session_by_token(db: Session, session_token: str):
     if not session:
         return None
 
-    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
+    if session.expires_at and _is_expired(session.expires_at):
         if session.is_active:
             session.is_active = False
             db.commit()
@@ -54,7 +69,7 @@ def get_session_by_user(db: Session, user_id: int):
     if not session:
         return None
 
-    if session.expires_at and session.expires_at < datetime.now(timezone.utc):
+    if session.expires_at and _is_expired(session.expires_at):
         if session.is_active:
             session.is_active = False
             db.commit()
@@ -119,7 +134,7 @@ def get_user_from_session_token(db: Session, session_token: str):
     session = get_user_session_by_token(db, session_token)
     if not session or not session.is_active:
         return None
-    if session.expires_at < datetime.now(timezone.utc):
+    if _is_expired(session.expires_at):
         deactivate_session(db, session.session_id)
         return None
     return session.user
