@@ -309,11 +309,14 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
             tokens: list[str] = []
             async for token in stream_reduce(reduce_input["text"], reduce_input["category"]):
                 tokens.append(token)
-                notification_service.push_event(user_id, {
-                    "type": "summary_token",
-                    "job_id": job_id,
-                    "token": token,
-                })
+                notification_service.push_event(
+                    user_id,
+                    {
+                        "type": "summary_token",
+                        "job_id": job_id,
+                        "token": token,
+                    },
+                )
 
             summary_text = "".join(tokens).strip()
             resolved_category = reduce_input["category"]
