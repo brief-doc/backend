@@ -30,7 +30,7 @@ from pathlib import Path
 from app.ocr.utils import SUPPORTED_EXTENSIONS
 
 
-def process_document(file_path: str, pages: list = None) -> str:
+def process_document(file_path: str, pages: list = None, cancel_check=None) -> str:
     """
     확장자에 맞는 추출기를 호출하고 마크다운 문자열 반환.
 
@@ -56,7 +56,7 @@ def process_document(file_path: str, pages: list = None) -> str:
             print("  엔진: Docling + pypdfium2 + paddleocr")
         else:
             print("  엔진: Docling")
-        result = extract(file_path, pages=pages)
+        result = extract(file_path, pages=pages, cancel_check=cancel_check)
         print(result)
         return result
         # return extract(file_path, pages=pages)

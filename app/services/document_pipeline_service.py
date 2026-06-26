@@ -232,7 +232,12 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
         try:
             from app.ocr.extractor import process_document
 
-            raw_text: str = await loop.run_in_executor(_executor, lambda: process_document(file_path))
+            raw_text: str = await loop.run_in_executor(
+                _executor, lambda: process_document(file_path, cancel_check=cancel_event.is_set)
+            )
+        except InterruptedError:
+            _cancel_cleanup(db, job)
+            return
         except Exception as e:
             _fail_job(db, job, "ocr", f"OCR 처리 중 오류: {e}")
             _notify_failure(db, user_id, job_id, filename, "OCR")
