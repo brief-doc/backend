@@ -304,7 +304,7 @@ def _merge_split_tables(blocks: list[str]) -> list[str]:
 
 
 # ── PDF 처리 ──────────────────────────────────────────────────────────────────
-def process_pdf(pdf_path: str, page_filter: set = None) -> list[str]:
+def process_pdf(pdf_path: str, page_filter: set = None, cancel_check=None) -> list[str]:
     pipeline = PPStructureV3(
         lang="korean",
         use_table_recognition=True,
@@ -324,6 +324,8 @@ def process_pdf(pdf_path: str, page_filter: set = None) -> list[str]:
         batches = [all_pages[i : i + BATCH_SIZE] for i in range(0, len(all_pages), BATCH_SIZE)]
 
     for batch_idx, batch_pages in enumerate(batches):
+        if cancel_check and cancel_check():
+            raise InterruptedError("cancelled")
         print(f"  배치 {batch_idx + 1}/{len(batches)}  페이지 {batch_pages}")
 
         # page_no → [(y_fitz, x_fitz, content), ...]
@@ -419,7 +421,7 @@ def process_pdf(pdf_path: str, page_filter: set = None) -> list[str]:
 
 
 # ── DOCX 처리 ─────────────────────────────────────────────────────────────────
-def process_docx(file_path: str, page_filter: set = None) -> list[str]:
+def process_docx(file_path: str, page_filter: set = None, cancel_check=None) -> list[str]:
     try:
         from docling.document_converter import DocumentConverter
     except ImportError:
@@ -446,6 +448,8 @@ def process_docx(file_path: str, page_filter: set = None) -> list[str]:
         _in_table_level: int | None = None
 
         for item, level in doc.iterate_items():
+            if cancel_check and cancel_check():
+                raise InterruptedError("cancelled")
             if page_filter and item.prov:
                 if item.prov[0].page_no not in page_filter:
                     continue
@@ -499,7 +503,7 @@ def process_docx(file_path: str, page_filter: set = None) -> list[str]:
 
 
 # ── 공개 인터페이스 ───────────────────────────────────────────────────────────
-def extract(file_path: str, pages: list = None) -> str:
+def extract(file_path: str, pages: list = None, cancel_check=None) -> str:
     """
     PDF 또는 DOCX 파일에서 마크다운 텍스트 추출.
 
@@ -516,8 +520,8 @@ def extract(file_path: str, pages: list = None) -> str:
 
     if ext == ".pdf":
         page_filter = set(pages) if pages else None
-        return "".join(process_pdf(file_path, page_filter))
+        return "".join(process_pdf(file_path, page_filter, cancel_check))
     if ext == ".docx":
         page_filter = set(pages) if pages else None
-        return "".join(process_docx(file_path, page_filter))
+        return "".join(process_docx(file_path, page_filter, cancel_check))
     raise ValueError(f"지원하지 않는 포맷: {ext} (pdf, docx만 가능)")

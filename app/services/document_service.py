@@ -115,7 +115,7 @@ def get_docs_detail(
 # 문서 삭제
 def soft_delete_doc(
     db: Session,
-    doc_id: int,
+    doc_id: int | None,
     user_id: int,
 ):
     doc = db.query(Document).filter(Document.doc_id == doc_id, Document.user_id == user_id, Document.is_deleted.is_(False)).first()
