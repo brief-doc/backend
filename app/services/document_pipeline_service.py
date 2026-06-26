@@ -6,7 +6,7 @@
 특징:
 - asyncio.create_task() 로 백그라운드 실행 → 화면 이탈 후에도 서버에서 계속 진행
 - 각 단계마다 SSE push_event 로 실시간 진행률 전송
-- is_cancelled 플래그로 단계 사이 취소 가능
+- asyncio.Event 기반 즉시 취소 (단계 사이 + 요약 스트리밍 루프 내 실시간 감지)
 - OCR/요약 결과 빈 값 시 트랜잭션 롤백 + 실패 알림 전송
 """
 
@@ -25,6 +25,9 @@ from app.services import notification_service
 
 KST = timezone(timedelta(hours=9))
 _executor = ThreadPoolExecutor(max_workers=2)
+
+# job_id → asyncio.Event 취소 레지스트리
+_cancel_events: dict[int, asyncio.Event] = {}
 
 UPLOAD_DIR = "pdf_files"
 
@@ -60,7 +63,7 @@ def _auto_classify(text: str) -> str:
     return "기타"
 
 
-def _push_stage(user_id: int, job_id: int, stage: str) -> None:
+def _push_stage(user_id: int, job_id: int, stage: str, doc_id: int | None = None) -> None:
     """SSE를 통해 클라이언트에 현재 단계 전송"""
     notification_service.push_event(
         user_id,
@@ -68,6 +71,7 @@ def _push_stage(user_id: int, job_id: int, stage: str) -> None:
             "type": "pipeline_progress",
             "job_id": job_id,
             "stage": stage,
+            "doc_id": doc_id,
         },
     )
 
@@ -79,7 +83,7 @@ def _update_job(db: Session, job: Job, stage: str, **kwargs) -> None:
     for k, v in kwargs.items():
         setattr(job, k, v)
     db.commit()
-    _push_stage(job.user_id, job.job_id, stage)
+    _push_stage(job.user_id, job.job_id, stage, doc_id=job.doc_id)
 
 
 def _fail_job(db: Session, job: Job, stage: str, message: str) -> None:
@@ -94,16 +98,21 @@ def _fail_job(db: Session, job: Job, stage: str, message: str) -> None:
     job.error_message = message
     job.job_finish = _now()
     db.commit()
-    _push_stage(job.user_id, job.job_id, "failed")
+    _push_stage(job.user_id, job.job_id, "failed", doc_id=job.doc_id)
 
 
 def _cancel_cleanup(db: Session, job: Job) -> None:
-    """취소 처리: 상태 저장 → SSE 푸시 → 임시 파일 삭제"""
+    """취소 처리: Document 소프트 삭제 → 상태 저장 → SSE 푸시 → 임시 파일 삭제"""
+    from app.services.document_service import soft_delete_doc
+
+    # doc_id 유무에 관계없이 항상 시도 — doc_id가 None이면 soft_delete_doc이 False 반환하고 종료
+    soft_delete_doc(db, doc_id=job.doc_id, user_id=job.user_id)
+
     job.job_status = "cancelled"
     job.pipeline_stage = "cancelled"
     job.job_finish = _now()
     db.commit()
-    _push_stage(job.user_id, job.job_id, "cancelled")
+    _push_stage(job.user_id, job.job_id, "cancelled", doc_id=job.doc_id)
     _cleanup_file(job.file_path)
 
 
@@ -147,7 +156,7 @@ def create_pipeline_job(db: Session, user_id: int, file_path: str) -> Job:
 
 
 def cancel_job(db: Session, job_id: int, user_id: int) -> Job | None:
-    """취소 플래그 설정 — 파이프라인이 다음 단계 시작 전에 확인하여 중단"""
+    """취소 요청 — asyncio.Event 즉시 발동 + DB 플래그 저장"""
     job = (
         db.query(Job)
         .filter(
@@ -161,6 +170,11 @@ def cancel_job(db: Session, job_id: int, user_id: int) -> Job | None:
         return None
     if job.job_status in ("completed", "failed", "cancelled"):
         return job
+
+    # 인메모리 이벤트 즉시 발동 → 파이프라인이 다음 루프에서 즉시 감지
+    if job_id in _cancel_events:
+        _cancel_events[job_id].set()
+
     job.is_cancelled = True
     db.commit()
     return job
@@ -201,6 +215,10 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
     db = SessionLocal()
     file_path: str | None = None
 
+    # 취소 이벤트 등록
+    cancel_event = asyncio.Event()
+    _cancel_events[job_id] = cancel_event
+
     try:
         job = db.query(Job).filter(Job.job_id == job_id).first()
         if not job:
@@ -220,7 +238,10 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
         try:
             from app.ocr.extractor import process_document
 
-            raw_text: str = await loop.run_in_executor(_executor, lambda: process_document(file_path))
+            raw_text: str = await loop.run_in_executor(_executor, lambda: process_document(file_path, cancel_check=cancel_event.is_set))
+        except InterruptedError:
+            _cancel_cleanup(db, job)
+            return
         except Exception as e:
             _fail_job(db, job, "ocr", f"OCR 처리 중 오류: {e}")
             _notify_failure(db, user_id, job_id, filename, "OCR")
@@ -308,6 +329,10 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
             # Reduce 단계: 토큰 단위 스트리밍 → SSE push
             tokens: list[str] = []
             async for token in stream_reduce(reduce_input["text"], reduce_input["category"]):
+                # 요약 중 취소 요청 즉시 감지
+                if cancel_event.is_set():
+                    _cancel_cleanup(db, job)
+                    return
                 tokens.append(token)
                 notification_service.push_event(
                     user_id,
@@ -355,7 +380,7 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
             pass
 
         # 완료: SSE 단계 푸시 + 알림
-        _push_stage(user_id, job_id, "completed")
+        _push_stage(user_id, job_id, "completed", doc_id=doc.doc_id)
         try:
             notification_service.create_notification(
                 db=db,
@@ -371,5 +396,6 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
         print(f"[pipeline job={job_id}] 예상치 못한 오류: {e}")
 
     finally:
+        _cancel_events.pop(job_id, None)  # 취소 이벤트 정리
         db.close()
         _cleanup_file(file_path)
