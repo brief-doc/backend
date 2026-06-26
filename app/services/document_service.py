@@ -60,15 +60,13 @@ def get_docs_with_latest_job(
     if keyword is not None and keyword.strip() != "":
         query = query.filter(Document.file_name.contains(keyword))
 
-    if sort_by == "title":
-        # 제목순 (오름차순)
-        order_stmt = [Document.file_name.asc(), Document.doc_id.desc()]
-    elif sort_by == "oldest":
-        # 오래된순
+    if sort_by == "oldest":
+        # 오래된순 — doc_id ASC로 DISTINCT ON 기준 유지
         order_stmt = [Document.doc_id.asc(), Job.job_start.asc()]
     else:
-        # 최신순 (기본값: Job 시작 시간 혹은 Document 생성일 역순)
-        order_stmt = [Document.doc_id.desc(), desc(Job.job_start)]
+        # 최신순(기본값) / 제목순 모두 doc_id DESC 우선으로 DISTINCT ON 충족 후 2차 정렬
+        secondary = Document.file_name.asc() if sort_by == "title" else desc(Job.job_start)
+        order_stmt = [Document.doc_id.desc(), secondary]
 
     # 4. 필터링된 전체 개수를 구함.
     total_count = query.count()
