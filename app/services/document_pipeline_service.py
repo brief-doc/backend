@@ -39,6 +39,16 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "내부 규정": ["내부", "내규", "방침", "사규"],
 }
 
+# 파이프라인 카테고리 → LLM 요약 카테고리 매핑
+# SUMMARY_TEMPLATES 키: 민사법, 행정법, 형사법, 지식재산권
+_PIPELINE_TO_SUMMARY: dict[str, str] = {
+    "법령·조례": "행정법",
+    "가이드라인·지침": "행정법",
+    "공모·사업": "행정법",
+    "감사": "행정법",
+    "내부 규정": "행정법",
+}
+
 
 # ── 헬퍼 ────────────────────────────────────────────────────────────────────
 
@@ -316,19 +326,31 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
 
         _update_job(db, job, "summarizing")
         category = _auto_classify(raw_text)
+        summary_category = _PIPELINE_TO_SUMMARY.get(category, "기타")
+        print(f"[pipeline job={job_id}] 요약 시작 — 카테고리: {category} → {summary_category}, 원문 길이: {len(raw_text)}자")
 
         try:
+            from app.llm.llm import get_summary_llm
             from app.llm.summarizer import prepare_reduce_input, stream_reduce
 
+            # LLM 싱글톤을 이벤트 루프에서 미리 초기화 (스레드풀 충돌 방지)
+            get_summary_llm()
+
             # Map 단계: 동기·병렬 처리 (스레드풀)
+            print(f"[pipeline job={job_id}] Map 단계 시작")
             reduce_input: dict = await loop.run_in_executor(
                 _executor,
-                lambda: prepare_reduce_input(raw_text, category),
+                lambda: prepare_reduce_input(raw_text, summary_category),
             )
+            print(f"[pipeline job={job_id}] Map 단계 완료 → Reduce 입력 길이: {len(reduce_input['text'])}자")
 
             # Reduce 단계: 토큰 단위 스트리밍 → SSE push
+            print(f"[pipeline job={job_id}] Reduce 단계 시작")
             tokens: list[str] = []
             async for token in stream_reduce(reduce_input["text"], reduce_input["category"]):
+                if not tokens:
+                    print(f"[pipeline job={job_id}] 첫 토큰 수신")
+                print(token, end="", flush=True)
                 # 요약 중 취소 요청 즉시 감지
                 if cancel_event.is_set():
                     _cancel_cleanup(db, job)
@@ -345,6 +367,7 @@ async def run_pipeline(job_id: int, user_id: int) -> None:
 
             summary_text = "".join(tokens).strip()
             resolved_category = reduce_input["category"]
+            print(f"[pipeline job={job_id}] 요약 완료 ({len(tokens)}토큰):\n{summary_text}")
         except Exception as e:
             _fail_job(db, job, "summarizing", f"요약 처리 중 오류: {e}")
             _notify_failure(db, user_id, job_id, filename, "요약")

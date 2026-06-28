@@ -45,11 +45,14 @@ def document(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    return doc_service.get_docs_detail(
+    doc = doc_service.get_docs_detail(
         db,
         doc_id=doc_id,
         user_id=current_user.user_id,
     )
+    if doc is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="문서를 찾을 수 없습니다.")
+    return doc
 
 
 # 3. Soft Delete 실행

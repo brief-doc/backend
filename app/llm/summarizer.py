@@ -32,7 +32,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from .chunker import SimpleCharacterSplitter
 from .config import SUMMARY_MAP_WORKERS
-from .llm import get_summary_llm
+from .llm import get_classify_llm, get_summary_llm
 from .prompts import CLASSIFY_PROMPT, MAP_PROMPT, SUMMARY_TEMPLATES, get_reduce_prompt  # noqa: F401
 
 # ── 설정 ──────────────────────────────────────────────────────────────────────
@@ -88,7 +88,7 @@ def classify_document_category(doc_text: str) -> str:
     valid = list(SUMMARY_TEMPLATES.keys())
     sample = doc_text[:CHUNK_SIZE].strip()
     try:
-        result = (CLASSIFY_PROMPT | get_summary_llm() | _parser).invoke({"text": sample})
+        result = (CLASSIFY_PROMPT | get_classify_llm() | _parser).invoke({"text": sample})
         classified = result.strip()
         if classified in valid:
             return classified
@@ -150,6 +150,8 @@ def summarize_document(doc_text: str, category: str) -> dict:
             # Reduce: 최종 요약 (단일 호출)
             summary = _invoke_reduce(combined, resolved)
 
+        print(f"[summarize] 카테고리: {resolved}, 청크 수: {chunks_used}")
+        print(f"[summarize] 요약 결과:\n{summary}")
         return {
             "status": "success",
             "category": resolved,
@@ -158,6 +160,7 @@ def summarize_document(doc_text: str, category: str) -> dict:
         }
 
     except Exception as e:
+        print(f"[summarize] 요약 실패: {e}")
         return {
             "status": "error",
             "category": resolved,
