@@ -102,7 +102,7 @@ class HybridRetriever(BaseRetriever):
 
         # 코사인 거리(0~2, 1-유사도) 기준 임계값. 이 값보다 거리가 크면 관련 없는 문서로 판단.
         # 거리 0.5 ≈ 코사인 유사도 0.5. 낮출수록 엄격해짐.
-        SCORE_THRESHOLD = 1.0
+        SCORE_THRESHOLD = 0.6
 
         docs: list[Document] = []
         for f in filters_to_try:
