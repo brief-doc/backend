@@ -11,7 +11,9 @@ load_dotenv()
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama")
 
 # ── Ollama 설정 ───────────────────────────────────
-CURRENT_MODEL = os.getenv("CURRENT_MODEL", "gemma2:2b")
+CURRENT_MODEL = os.getenv("CURRENT_MODEL", "gemma2_9b")
+SUMMARY_MODEL = os.getenv("SUMMARY_MODEL", "gemma2_9b")
+CLASSIFY_MODEL = os.getenv("CLASSIFY_MODEL", "ko-gemma-2-9b")
 _OLLAMA_DEFAULT_URL = "http://localhost:11434"
 _OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", _OLLAMA_DEFAULT_URL)
 
@@ -24,7 +26,7 @@ LLM_CONFIG = {
     "model": CURRENT_MODEL,
     "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")),
     "num_ctx": int(os.getenv("LLM_NUM_CTX", "4096")),
-    "num_predict": int(os.getenv("LLM_NUM_PREDICT", "512")),
+    "num_predict": int(os.getenv("LLM_NUM_PREDICT", "2048")),
     **_ollama_extra,
 }
 
@@ -43,11 +45,22 @@ HF_LLM_CONFIG = {
 }
 
 # ── 요약 전용 LLM 설정 (속도 우선) ───────────────────────────────────────────
+
+
 SUMMARY_LLM_CONFIG = {
-    **LLM_CONFIG,
-    "temperature": 0.1,
-    "num_ctx": int(os.getenv("SUMMARY_NUM_CTX", "2048")),
-    "num_predict": int(os.getenv("SUMMARY_NUM_PREDICT", "300")),
+    "model": SUMMARY_MODEL,
+    "temperature": float(os.getenv("LLM_TEMPERATURE", "0.1")),
+    "num_ctx": int(os.getenv("SUMMARY_NUM_CTX", "4096")),
+    "num_predict": int(os.getenv("SUMMARY_NUM_PREDICT", "800")),
+    **_ollama_extra,
+}
+
+CLASSIFY_LLM_CONFIG = {
+    "model": CLASSIFY_MODEL,
+    "temperature": 0.0,
+    "num_ctx": int(os.getenv("SUMMARY_NUM_CTX", "4096")),
+    "num_predict": 20,
+    **_ollama_extra,
 }
 
 HF_SUMMARY_LLM_CONFIG = {

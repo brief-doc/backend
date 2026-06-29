@@ -19,6 +19,7 @@ from __future__ import annotations
 from langchain_core.language_models import BaseChatModel
 
 from .config import (
+    CLASSIFY_LLM_CONFIG,
     HF_LLM_CONFIG,
     HF_SUMMARY_LLM_CONFIG,
     LLM_CONFIG,
@@ -29,6 +30,7 @@ from .config import (
 # ── 싱글톤 저장소 ─────────────────────────────────────────────────────────────
 _llm: BaseChatModel | None = None
 _summary_llm: BaseChatModel | None = None
+_classify_llm: BaseChatModel | None = None
 
 
 # ── 공급자별 LLM 생성 ─────────────────────────────────────────────────────────
@@ -121,11 +123,21 @@ def get_summary_llm() -> BaseChatModel:
     return _summary_llm
 
 
+def get_classify_llm() -> BaseChatModel:
+    """분류 전용 LLM 싱글톤 — 카테고리명만 출력하므로 num_predict=20으로 최소화."""
+    global _classify_llm
+    if _classify_llm is None:
+        _classify_llm = _build_llm(CLASSIFY_LLM_CONFIG, HF_SUMMARY_LLM_CONFIG)
+        print(f"[llm] get_classify_llm 초기화 완료 (provider={LLM_PROVIDER})")
+    return _classify_llm
+
+
 def reload_llm() -> None:
     """LLM 싱글톤을 초기화합니다 (모델 변경 후 재로드 시 사용)."""
-    global _llm, _summary_llm
+    global _llm, _summary_llm, _classify_llm
     _llm = None
     _summary_llm = None
+    _classify_llm = None
     print("[llm] 싱글톤 초기화 완료 — 다음 호출 시 재생성됩니다.")
 
 

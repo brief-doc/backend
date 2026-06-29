@@ -156,11 +156,18 @@ async def query_stream(
         # 2. 토큰 스트리밍: sync generator → async Queue 브릿지
         token_queue: asyncio.Queue[str | None] = asyncio.Queue()
 
+        print(f"[rag] 컨텍스트 {len(docs)}개 문서, {len(context)}자")
+        print(f"[rag] 컨텍스트 앞 300자:\n{context[:300]}")
+
         def _stream_worker():
             try:
+                full = []
                 for chunk in stream_chain.stream({"context": context, "question": q}):
+                    full.append(chunk)
                     asyncio.run_coroutine_threadsafe(token_queue.put(chunk), loop)
+                print(f"[rag] LLM 응답: {''.join(full)[:300]}")
             except Exception as err:
+                print(f"[rag] 스트리밍 오류: {err}")
                 asyncio.run_coroutine_threadsafe(token_queue.put(f"\n[오류: {err}]"), loop)
             finally:
                 asyncio.run_coroutine_threadsafe(token_queue.put(None), loop)
