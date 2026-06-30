@@ -42,7 +42,7 @@ async def subscribe(current_user=Depends(get_current_user)):
         except asyncio.CancelledError:
             pass
         finally:
-            notification_service.unsubscribe(user_id)
+            notification_service.unsubscribe(user_id, queue)
 
     return StreamingResponse(
         event_stream(),

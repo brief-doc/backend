@@ -13,8 +13,8 @@ KST = timezone(timedelta(hours=9))
 # ── 전역 이벤트 루프 참조 (startup 시 설정) ─────────────────────────────────
 _loop: Optional[asyncio.AbstractEventLoop] = None
 
-# ── 사용자별 SSE 큐 ──────────────────────────────────────────────────────────
-_user_queues: Dict[int, asyncio.Queue] = {}
+# ── 사용자별 SSE 큐 (탭·창 다중 연결 지원: 큐 리스트) ───────────────────────
+_user_queues: Dict[int, list[asyncio.Queue]] = {}
 
 
 def set_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -27,12 +27,20 @@ def set_loop(loop: asyncio.AbstractEventLoop) -> None:
 
 def subscribe(user_id: int) -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue()
-    _user_queues[user_id] = q
+    _user_queues.setdefault(user_id, []).append(q)
     return q
 
 
-def unsubscribe(user_id: int) -> None:
-    _user_queues.pop(user_id, None)
+def unsubscribe(user_id: int, q: asyncio.Queue) -> None:
+    queues = _user_queues.get(user_id)
+    if not queues:
+        return
+    try:
+        queues.remove(q)
+    except ValueError:
+        pass
+    if not queues:
+        _user_queues.pop(user_id, None)
 
 
 # ── 알림 생성 + 실시간 Push ──────────────────────────────────────────────────
@@ -76,8 +84,10 @@ def _serialize(noti: Notification) -> dict:
 
 
 def _push_sync(user_id: int, payload: dict) -> None:
-    if _loop and _loop.is_running() and user_id in _user_queues:
-        _loop.call_soon_threadsafe(_user_queues[user_id].put_nowait, payload)
+    if not (_loop and _loop.is_running()):
+        return
+    for q in list(_user_queues.get(user_id, [])):
+        _loop.call_soon_threadsafe(q.put_nowait, payload)
 
 
 def push_event(user_id: int, payload: dict) -> None:
