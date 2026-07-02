@@ -192,7 +192,7 @@ def run_query(
                 "doc_name": doc_name,
                 "category": meta.get("category", ""),
                 "page": meta.get("page_num", ""),
-                "snippet": doc.page_content[:200] + "...",
+                "snippet": doc.page_content,
             }
         )
 

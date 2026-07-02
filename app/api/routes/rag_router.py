@@ -64,7 +64,7 @@ def _build_refs(docs) -> list[dict]:
             "doc_name": doc.metadata.get("doc_name") or doc.metadata.get("file_name", "?"),
             "category": doc.metadata.get("category", ""),
             "page": str(doc.metadata.get("page_num", "")),
-            "snippet": doc.page_content[:200] + "...",
+            "snippet": doc.page_content,
         }
         for doc in docs
     ]
